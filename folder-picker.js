@@ -1,45 +1,9 @@
 // Folder picker page - handles initial folder selection with proper user activation
 
-// IndexedDB for storing directory handle
-async function openDB() {
-    return new Promise((resolve, reject) => {
-        const request = indexedDB.open('OutsideControl', 1);
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => resolve(request.result);
-        request.onupgradeneeded = (e) => {
-            const db = e.target.result;
-            if (!db.objectStoreNames.contains('handles')) {
-                db.createObjectStore('handles');
-            }
-        };
-    });
-}
-
-async function storeHandle(handle) {
-    const db = await openDB();
-    const tx = db.transaction(['handles'], 'readwrite');
-    const store = tx.objectStore('handles');
-    await store.put(handle, 'exportDirectory');
-}
+import { getStoredHandle, storeHandle } from './lib/idb.js';
 
 let directoryHandle = null;
 let step = 1;
-
-// Check if we already have a handle (for permission upgrade)
-async function checkExistingHandle() {
-    try {
-        const db = await openDB();
-        const tx = db.transaction(['handles'], 'readonly');
-        const store = tx.objectStore('handles');
-        return new Promise((resolve, reject) => {
-            const request = store.get('exportDirectory');
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error);
-        });
-    } catch (e) {
-        return null;
-    }
-}
 
 // Initialize page
 async function init() {
@@ -129,7 +93,7 @@ document.getElementById('select-folder').addEventListener('click', async () => {
             await storeHandle(handle);
 
             // Verify handle was actually stored
-            const verifyHandle = await checkExistingHandle();
+            const verifyHandle = await getStoredHandle();
             if (!verifyHandle) {
                 throw new Error('Failed to store directory handle - IndexedDB may be disabled or quota exceeded');
             }
