@@ -1,3 +1,6 @@
+import { getStoredHandle, storeHandle, openDB } from './lib/idb.js';
+import { formatTime, formatTimeRemaining } from './lib/time.js';
+
 let directoryHandle = null;
 
 // Load export settings
@@ -50,47 +53,6 @@ async function checkStateHealth() {
     // The background script will tell us if state is healthy through export settings
     const response = await chrome.runtime.sendMessage({ action: 'getExportSettings' });
     return response.settings && response.settings.directoryHandle;
-}
-
-// IndexedDB for storing directory handle
-async function openDB() {
-    return new Promise((resolve, reject) => {
-        const request = indexedDB.open('OutsideControl', 1);
-
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => resolve(request.result);
-
-        request.onupgradeneeded = (e) => {
-            const db = e.target.result;
-            if (!db.objectStoreNames.contains('handles')) {
-                db.createObjectStore('handles');
-            }
-        };
-    });
-}
-
-async function storeHandle(handle) {
-    const db = await openDB();
-    const tx = db.transaction(['handles'], 'readwrite');
-    const store = tx.objectStore('handles');
-    await store.put(handle, 'exportDirectory');
-
-    // Verify storage succeeded
-    return new Promise((resolve, reject) => {
-        tx.oncomplete = () => resolve(true);
-        tx.onerror = () => reject(tx.error);
-    });
-}
-
-async function getStoredHandle() {
-    const db = await openDB();
-    const tx = db.transaction(['handles'], 'readonly');
-    const store = tx.objectStore('handles');
-    return new Promise((resolve, reject) => {
-        const request = store.get('exportDirectory');
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-    });
 }
 
 // Update folder status display
@@ -266,35 +228,6 @@ function showToast(message) {
     setTimeout(() => toast.remove(), 3000);
 }
 
-// Format time
-function formatTime(seconds) {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-
-    if (hours > 0) {
-        return `${hours}h ${minutes}m`;
-    } else if (minutes > 0) {
-        return `${minutes}m ${secs}s`;
-    } else {
-        return `${secs}s`;
-    }
-}
-
-// Format time remaining
-function formatTimeRemaining(seconds) {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-
-    if (hours > 0) {
-        return `${hours} hours ${minutes} mins`;
-    } else if (minutes > 0) {
-        return `${minutes} mins`;
-    } else {
-        return `${seconds} seconds`;
-    }
-}
-
 // Load current site info
 async function loadCurrentSite() {
     const response = await chrome.runtime.sendMessage({ action: 'getCurrentSite' });
@@ -387,10 +320,3 @@ setInterval(() => {
     loadCurrentSite();
     loadUsage();
 }, 5000);
-
-// Auto-save if configured
-setInterval(async () => {
-    if (directoryHandle) {
-        await writeCurrentDayCSV();
-    }
-}, 5 * 60 * 1000); // Every 5 minutes
