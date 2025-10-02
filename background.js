@@ -1,8 +1,8 @@
 // Import shared modules
 import { MIN, HOUR } from './lib/constants.js';
 import { getDateKey } from './lib/time.js';
-import { generateCSV } from './lib/csv.js';
 import { buildDomainMap, lookupGroup } from './lib/domains.js';
+import { saveStateToIDB, loadStateFromIDB, saveUsageToIDB, loadUsageForDate } from './lib/idb.js';
 
 // Configuration
 const POLICIES = {
@@ -36,9 +36,7 @@ let sessions = {};
 let quotas = { hn: [] };
 let lunchUsed = {};
 let streamingFirstAccess = {}; // Track first streaming access time per day
-let usage = {};
-let exportSettings = null;
-let stateHealthy = false; // Only true after successful load from file
+let usage = {}; // In-memory cache of usage data
 
 // Initialize - fixed race condition by ensuring loadState completes first
 chrome.runtime.onInstalled.addListener(async (details) => {
@@ -53,6 +51,14 @@ chrome.runtime.onStartup.addListener(async () => {
 
 // Unified initialization to prevent race conditions
 async function initialize() {
+    // Request persistent storage
+    try {
+        const isPersisted = await navigator.storage.persist();
+        console.log('[Init] Persistent storage:', isPersisted ? 'granted' : 'denied');
+    } catch (e) {
+        console.error('[Init] Failed to request persistent storage:', e);
+    }
+
     // CRITICAL: Load state first before any tracking starts
     await loadState();
 
@@ -100,69 +106,15 @@ function migrateState(state) {
     return migratedState;
 }
 
-// Load state from chrome.storage.local and FSA
+// Load state from IndexedDB
 async function loadState() {
     try {
-        // A) Load durable local copy
-        let local = null;
-        try {
-            const got = await chrome.storage.local.get('outsideControl.state');
-            local = got['outsideControl.state'] || null;
-            if (local) {
-                console.log('[LoadState] Loaded from chrome.storage.local');
-            }
-        } catch (e) {
-            console.error('[LoadState] Failed to read chrome.storage.local:', e);
-        }
+        const state = await loadStateFromIDB();
 
-        // B) Try FSA file via offscreen
-        await ensureOffscreenDocument();
-        let fileResult = null;
-        try {
-            fileResult = await chrome.runtime.sendMessage({ action: 'offscreen-read-state' });
-            if (fileResult && fileResult.success && fileResult.state) {
-                console.log('[LoadState] Loaded from FSA file');
-            }
-        } catch (e) {
-            console.error('[LoadState] Failed to read FSA file:', e);
-            fileResult = { success: false, exists: false };
-        }
-
-        // C) Decide which state to use (prefer the freshest)
-        let chosen = null;
-        if (fileResult && fileResult.success && fileResult.state) {
-            chosen = fileResult.state;
-            if (fileResult.recoveredFromBackup) {
-                console.warn('[LoadState] Recovered from backup file');
-                showErrorBadge('Recovered from backup; main file was corrupted');
-            }
-        }
-        if (local && (!chosen || (local.lastSaved || 0) > (chosen.lastSaved || 0))) {
-            chosen = local;
-            console.log('[LoadState] Using chrome.storage.local (fresher than file)');
-        }
-
-        if (!chosen) {
-            // Fresh state
-            console.log('[LoadState] No existing state found, initializing fresh state');
-            sessions = {};
-            quotas = { hn: [] };
-            lunchUsed = {};
-            streamingFirstAccess = {};
-            usage = {};
-            exportSettings = null;
-            stateHealthy = true; // chrome.storage.local is always available
-            return;
-        }
-
-        // Load chosen state
-        const migrated = migrateState(chosen);
-        sessions = migrated.sessions || {};
-        quotas = migrated.quotas || { hn: [] };
-        lunchUsed = migrated.lunchUsed || {};
-        streamingFirstAccess = migrated.streamingFirstAccess || {};
-        usage = migrated.usage || {};
-        exportSettings = migrated.exportSettings || null;
+        sessions = state.sessions;
+        quotas = state.quotas;
+        lunchUsed = state.lunchUsed;
+        streamingFirstAccess = state.streamingFirstAccess;
 
         // Clean expired sessions
         const now = Date.now();
@@ -172,12 +124,19 @@ async function loadState() {
             }
         }
 
-        stateHealthy = true; // State loaded successfully
-        console.log('[LoadState] Loaded. Days:', Object.keys(usage).length, 'stateHealthy=', stateHealthy);
+        // Load today's usage into memory cache
+        const today = getDateKey();
+        usage[today] = await loadUsageForDate(today);
+
+        console.log('[LoadState] Loaded from IndexedDB');
     } catch (err) {
         console.error('[LoadState] Failed:', err);
-        // Fallback: keep in-memory defaults; local save on first change will persist
-        stateHealthy = true; // chrome.storage.local should still work
+        // Start with fresh state if load fails
+        sessions = {};
+        quotas = { hn: [] };
+        lunchUsed = {};
+        streamingFirstAccess = {};
+        usage = {};
     }
 }
 
@@ -185,33 +144,11 @@ async function loadState() {
 let dirty = false;
 let saving = false;
 let lastSave = 0;
-let fileSaveRetryCount = 0;
-const MAX_FILE_SAVE_RETRIES = 3;
 
 // Validate state integrity before saving
 function validateState(state) {
     if (!state || typeof state !== 'object') return false;
-    if (!state.usage || typeof state.usage !== 'object') return false;
     if (!state.dataVersion) return false;
-
-    // Check usage structure
-    for (const [date, data] of Object.entries(state.usage)) {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-            console.error('[Validate] Invalid date format:', date);
-            return false;
-        }
-        if (typeof data !== 'object') {
-            console.error('[Validate] Invalid data type for date:', date);
-            return false;
-        }
-        for (const [host, ms] of Object.entries(data)) {
-            if (typeof ms !== 'number' || ms < 0) {
-                console.error('[Validate] Invalid time value for', host, ':', ms);
-                return false;
-            }
-        }
-    }
-
     return true;
 }
 
@@ -238,81 +175,31 @@ async function saveState(force = false) {
             quotas,
             lunchUsed,
             streamingFirstAccess,
-            usage,
-            exportSettings,
             lastSaved: now,
             dataVersion: '3.0.0'
         };
 
-        // Basic validation (unchanged)
+        // Basic validation
         if (!validateState(stateToSave) && !force) {
             throw new Error('State validation failed - refusing to write corrupted data');
         }
 
-        // 1) Always persist to extension storage (primary storage)
-        await chrome.storage.local.set({ 'outsideControl.state': stateToSave });
-        console.log('[SaveState] State saved to chrome.storage.local');
+        // Save state to IndexedDB
+        await saveStateToIDB(stateToSave);
 
-        // 2) Best-effort file persistence via offscreen (optional/secondary)
-        const canUseFSA = exportSettings && exportSettings.directoryHandle;
-        if (!canUseFSA) {
-            lastSave = now;
-            dirty = false;
-            stateHealthy = true; // State is healthy if we can save to chrome.storage
-            clearErrorBadge();
-            saving = false;
-            return;
+        // Save today's usage to IndexedDB
+        const today = getDateKey();
+        if (usage[today]) {
+            await saveUsageToIDB(today, usage[today]);
         }
 
-        // Ensure offscreen exists, then try write
-        await ensureOffscreenDocument();
-        const writeResult = await chrome.runtime.sendMessage({
-            action: 'offscreen-write-state',
-            state: stateToSave
-        });
+        lastSave = now;
+        dirty = false;
 
-        if (writeResult && writeResult.success) {
-            lastSave = now;
-            fileSaveRetryCount = 0;
-            dirty = false;
-            stateHealthy = true;
-            clearErrorBadge();
-            console.log('[SaveState] State saved to both chrome.storage.local and file at', new Date(now).toISOString());
-        } else {
-            throw new Error((writeResult && writeResult.error) || 'Unknown offscreen write error');
-        }
+        console.log('[SaveState] State saved to IndexedDB');
     } catch (e) {
         console.error('[SaveState] Save failed:', e);
-
-        // Check if at least chrome.storage succeeded
-        try {
-            const test = await chrome.storage.local.get('outsideControl.state');
-            if (test['outsideControl.state']) {
-                console.log('[SaveState] chrome.storage.local save succeeded, file write failed (non-critical)');
-                lastSave = Date.now();
-                dirty = false;
-                stateHealthy = true;
-
-                // Schedule a retry with alarms (survives worker termination)
-                if (fileSaveRetryCount < MAX_FILE_SAVE_RETRIES) {
-                    fileSaveRetryCount++;
-                    const delayMs = Math.pow(2, fileSaveRetryCount) * 1000; // 2s,4s,8s
-                    chrome.alarms.create('retry-file-save', { when: Date.now() + delayMs });
-                    showErrorBadge('File save pending - local data safe');
-                } else {
-                    showErrorBadge('File not saved - local data safe');
-                }
-                saving = false;
-                return;
-            }
-        } catch (testError) {
-            console.error('[SaveState] chrome.storage.local verification failed:', testError);
-        }
-
-        // Both failed - this is critical
         dirty = true;
-        stateHealthy = false;
-        showErrorBadge('Storage error - data not saved');
     } finally {
         saving = false;
     }
@@ -341,14 +228,6 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
         await handleMidnight();
     } else if (alarm.name === 'saveUsage') {
         await saveState();
-        // Auto-export current day if configured
-        if (exportSettings && exportSettings.autoExport) {
-            await autoExportCSV(getDateKey());
-        }
-    } else if (alarm.name === 'retry-file-save') {
-        // Try to flush to file again; local storage already has the data
-        console.log('[Alarm] Retrying file save (local data already safe)');
-        await saveState(true);
     } else if (alarm.name.startsWith('session-')) {
         const host = alarm.name.substring(8);
         delete sessions[host];
@@ -359,68 +238,19 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
 // Handle midnight rollover
 async function handleMidnight() {
-    const yesterday = getDateKey(new Date(Date.now() - 24 * 60 * 60 * 1000));
-
-    // Export yesterday's CSV
-    if (usage[yesterday]) {
-        await autoExportCSV(yesterday);
-    }
-
     // Reset daily state
     lunchUsed = {};
     streamingFirstAccess = {};
 
-    // Clean old usage data (keep last 30 days)
-    const cutoff = getDateKey(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
-    for (const date in usage) {
-        if (date < cutoff) {
-            delete usage[date];
-        }
-    }
+    // Load today's usage into cache
+    const today = getDateKey();
+    usage[today] = await loadUsageForDate(today);
 
     await saveState();
 
     // Schedule next midnight
     scheduleMidnight();
 }
-
-// Get browser name - async to handle Brave's Promise-based API
-async function getBrowserName() {
-    // Check for Brave first using its API (it returns a Promise in newer versions)
-    try {
-        if (navigator.brave && typeof navigator.brave.isBrave === 'function') {
-            const isBrave = await navigator.brave.isBrave();
-            if (isBrave) {
-                console.log('[Browser] Detected Brave browser');
-                return 'brave';
-            }
-        }
-    } catch (e) {
-        // Not Brave or old version, continue with UA detection
-        console.log('[Browser] Brave detection failed, using UA:', e.message);
-    }
-
-    const userAgent = navigator.userAgent.toLowerCase();
-    if (userAgent.includes('edg')) return 'edge'; // Check Edge before Chrome
-    if (userAgent.includes('chrome')) return 'chrome';
-    if (userAgent.includes('firefox')) return 'firefox';
-    if (userAgent.includes('safari')) return 'safari';
-    return 'unknown';
-}
-
-// Show error badge to notify user
-function showErrorBadge(message) {
-    chrome.action.setBadgeText({ text: '!' });
-    chrome.action.setBadgeBackgroundColor({ color: '#e53e3e' });
-    chrome.action.setTitle({ title: message || 'Storage error - click for details' });
-}
-
-// Clear error badge
-function clearErrorBadge() {
-    chrome.action.setBadgeText({ text: '' });
-    chrome.action.setTitle({ title: 'Outside-Control' });
-}
-
 
 // Get host from URL
 function getHost(url) {
@@ -687,30 +517,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
 
         return true; // Keep message channel open for async response
-    } else if (request.action === 'ensureOffscreen') {
-        ensureOffscreenDocument().then(() => sendResponse({ success: true }));
-        return true;
-    } else if (request.action === 'offscreen-request-persistent' ||
-               request.action === 'offscreen-write' ||
-               request.action === 'offscreen-check-handle') {
-        // Forward these messages to the offscreen document
-        ensureOffscreenDocument().then(async () => {
-            try {
-                const result = await chrome.runtime.sendMessage(request);
-                sendResponse(result);
-            } catch (e) {
-                sendResponse({ success: false, error: e.message });
-            }
-        });
-        return true;
     } else if (request.action === 'getUsage') {
         const today = getDateKey();
         const todayUsage = usage[today] || {};
         console.log('[GetUsage] Returning data for', today, 'with', Object.keys(todayUsage).length, 'domains');
         sendResponse({ usage: todayUsage });
-    } else if (request.action === 'exportCSV') {
-        exportCSV(getDateKey()).then(sendResponse);
-        return true;
     } else if (request.action === 'getCurrentSite') {
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
             if (tabs[0] && tabs[0].url) {
@@ -722,35 +533,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }
         });
         return true;
-    } else if (request.action === 'saveExportSettings') {
-        (async () => {
-            exportSettings = request.settings;
-            // If we're setting up for the first time, initialize state
-            if (!stateHealthy && request.settings.directoryHandle) {
-                await initializeState();
-            } else {
-                await saveState();
-            }
-            sendResponse({ success: true });
-        })();
-        return true;
-    } else if (request.action === 'getExportSettings') {
-        sendResponse({ settings: exportSettings });
-    } else if (request.action === 'initializeState') {
-        // Initialize state when folder is first selected
-        initializeState().then(success => {
-            sendResponse({ success });
-        });
-        return true;
-    } else if (request.action === 'permissionLost') {
-        // Permission was revoked, disable auto-export and notify user
-        console.error('[PermissionLost] File system permission lost:', request.permission);
-        if (exportSettings) {
-            exportSettings.persistentPermission = false;
-            exportSettings.autoExport = false;
-        }
-        showErrorBadge('File permission lost - please re-select folder');
-        saveState().catch(e => console.error('Failed to save after permission loss:', e));
     }
 });
 
@@ -764,154 +546,3 @@ async function notifyTabsOfBlock(host) {
     }
 }
 
-// Initialize state when folder is first configured
-async function initializeState() {
-    try {
-        console.log('[InitState] Initializing fresh state file');
-
-        // Set up fresh state
-        sessions = {};
-        quotas = { hn: [] };
-        lunchUsed = {};
-        streamingFirstAccess = {};
-        usage = {};
-
-        const browserName = await getBrowserName();
-        exportSettings = {
-            directoryHandle: true,
-            autoExport: true,
-            browserName: browserName,
-            persistentPermission: true
-        };
-
-        stateHealthy = true; // Allow writes
-
-        // Save initial state
-        await saveState(true); // Force save even with empty usage
-
-        console.log('[InitState] State file initialized successfully');
-        clearErrorBadge(); // Clear any error states
-        return true;
-    } catch (error) {
-        console.error('[InitState] Failed to initialize state:', error);
-        stateHealthy = false;
-        showErrorBadge('Failed to initialize storage');
-        return false;
-    }
-}
-
-
-// Export CSV (manual) - use data URL instead of blob URL for service worker compatibility
-async function exportCSV(date) {
-    const csv = generateCSV(date, usage[date]);
-
-    // Create data URL (works in service worker context)
-    const dataUrl = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
-
-    await chrome.downloads.download({
-        url: dataUrl,
-        filename: `outside-control-usage-${date}.csv`,
-        conflictAction: 'overwrite'
-    });
-
-    return { success: true };
-}
-
-// Create offscreen document if needed
-let creatingOffscreen;
-async function ensureOffscreenDocument() {
-    // Check if offscreen document already exists
-    const existingContexts = await chrome.runtime.getContexts({
-        contextTypes: ['OFFSCREEN_DOCUMENT'],
-        documentUrls: [chrome.runtime.getURL('offscreen.html')]
-    });
-
-    if (existingContexts.length > 0) {
-        return;
-    }
-
-    // Create offscreen document if it doesn't exist
-    if (creatingOffscreen) {
-        await creatingOffscreen;
-    } else {
-        creatingOffscreen = chrome.offscreen.createDocument({
-            url: 'offscreen.html',
-            reasons: ['LOCAL_STORAGE'],
-            justification: 'File System Access API operations for persistent file storage'
-        });
-        await creatingOffscreen;
-        creatingOffscreen = null;
-    }
-}
-
-// Write file using offscreen document
-async function writeFileFromBackground(filename, content) {
-    if (!exportSettings || !exportSettings.persistentPermission) {
-        console.log('No persistent permission - skipping background write');
-        return false;
-    }
-
-    try {
-        // Ensure offscreen document exists
-        await ensureOffscreenDocument();
-
-        // Send message to offscreen document
-        const result = await chrome.runtime.sendMessage({
-            action: 'offscreen-write',
-            filename,
-            content
-        });
-
-        if (result.success) {
-            console.log('Background: File written successfully via offscreen');
-            return true;
-        } else {
-            console.error('Background: File write failed:', result.error);
-
-            // If permissions were revoked, disable auto-export
-            if (result.error && (result.error.includes('NotAllowedError') || result.error.includes('NotFoundError'))) {
-                console.log('Background: Disabling auto-export due to permission/access error');
-                exportSettings = { ...exportSettings, autoExport: false, persistentPermission: false };
-                await saveState();
-            }
-            return false;
-        }
-    } catch (e) {
-        console.error('Background file write failed:', e);
-        return false;
-    }
-}
-
-// Auto-export CSV (to configured directory)
-async function autoExportCSV(date) {
-    if (!exportSettings || !exportSettings.directoryHandle) {
-        return;
-    }
-
-    try {
-        const csv = generateCSV(date, usage[date]);
-        const filename = `outside-control-usage-${date}.csv`;
-
-        // Try background write first (if persistent permission is available)
-        if (exportSettings.persistentPermission) {
-            console.log('Attempting background file write for:', filename);
-            const success = await writeFileFromBackground(filename, csv);
-            if (success) {
-                console.log('Background export successful');
-                return;
-            }
-            console.log('Background export failed, falling back to message-based approach');
-        }
-
-        // Fallback: Send to popup/options page to write
-        chrome.runtime.sendMessage({
-            action: 'writeFile',
-            filename,
-            content: csv
-        }).catch(() => {
-            console.log('No popup open to handle file write - this is expected for background operations');
-        });
-    } catch (e) {
-        console.error('Auto-export failed:', e);
-    }
-}
