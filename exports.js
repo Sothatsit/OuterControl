@@ -139,6 +139,7 @@ async function loadUsage() {
         container.innerHTML = html;
     } catch (error) {
         console.error('Failed to load usage:', error);
+        container.innerHTML = '<div class="no-data">Error loading usage data</div>';
     }
 }
 

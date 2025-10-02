@@ -38,6 +38,11 @@ let lunchUsed = {};
 let streamingFirstAccess = {}; // Track first streaming access time per day
 let usage = {}; // In-memory cache of usage data
 
+// Initialization guard
+let ready = false;
+let readyPromise = null;
+let readyResolve = null;
+
 // Initialize - fixed race condition by ensuring loadState completes first
 chrome.runtime.onInstalled.addListener(async (details) => {
     console.log('[Init] Extension installed/updated, reason:', details.reason);
@@ -51,12 +56,19 @@ chrome.runtime.onStartup.addListener(async () => {
 
 // Unified initialization to prevent race conditions
 async function initialize() {
+    // Create ready promise if not already created
+    if (!readyPromise) {
+        readyPromise = new Promise(resolve => {
+            readyResolve = resolve;
+        });
+    }
+
     // Request persistent storage
-    try {
-        const isPersisted = await navigator.storage.persist();
-        console.log('[Init] Persistent storage:', isPersisted ? 'granted' : 'denied');
-    } catch (e) {
-        console.error('[Init] Failed to request persistent storage:', e);
+    const isPersisted = await navigator.storage.persist();
+    console.log('[Init] Persistent storage:', isPersisted ? 'granted' : 'denied');
+
+    if (!isPersisted) {
+        throw new Error('Persistent storage denied - extension cannot function properly');
     }
 
     // CRITICAL: Load state first before any tracking starts
@@ -65,7 +77,22 @@ async function initialize() {
     // Set up alarms after state is loaded
     setupAlarms();
 
+    // Mark as ready
+    ready = true;
+    readyResolve();
+
     console.log('[Init] Initialization complete');
+}
+
+// Wait for initialization to complete
+async function ensureReady() {
+    if (!ready) {
+        if (!readyPromise) {
+            // Initialize hasn't been called yet, start it
+            await initialize();
+        }
+        await readyPromise;
+    }
 }
 
 // Save tracking data before extension unloads
@@ -108,42 +135,30 @@ function migrateState(state) {
 
 // Load state from IndexedDB
 async function loadState() {
-    try {
-        const state = await loadStateFromIDB();
+    const state = await loadStateFromIDB();
 
-        sessions = state.sessions;
-        quotas = state.quotas;
-        lunchUsed = state.lunchUsed;
-        streamingFirstAccess = state.streamingFirstAccess;
+    sessions = state.sessions;
+    quotas = state.quotas;
+    lunchUsed = state.lunchUsed;
+    streamingFirstAccess = state.streamingFirstAccess;
 
-        // Clean expired sessions
-        const now = Date.now();
-        for (const key in sessions) {
-            if (sessions[key].expiresAt < now) {
-                delete sessions[key];
-            }
+    // Clean expired sessions
+    const now = Date.now();
+    for (const key in sessions) {
+        if (sessions[key].expiresAt < now) {
+            delete sessions[key];
         }
-
-        // Load today's usage into memory cache
-        const today = getDateKey();
-        usage[today] = await loadUsageForDate(today);
-
-        console.log('[LoadState] Loaded from IndexedDB');
-    } catch (err) {
-        console.error('[LoadState] Failed:', err);
-        // Start with fresh state if load fails
-        sessions = {};
-        quotas = { hn: [] };
-        lunchUsed = {};
-        streamingFirstAccess = {};
-        usage = {};
     }
+
+    // Load today's usage into memory cache
+    const today = getDateKey();
+    usage[today] = await loadUsageForDate(today);
+
+    console.log('[LoadState] Loaded from IndexedDB');
 }
 
-// Debounced save state
-let dirty = false;
+// Prevent concurrent saves
 let saving = false;
-let lastSave = 0;
 
 // Validate state integrity before saving
 function validateState(state) {
@@ -152,24 +167,17 @@ function validateState(state) {
     return true;
 }
 
-// Save state - debounced to save at most every 5 seconds
-async function saveState(force = false) {
-    dirty = true;
-    const now = Date.now();
-
-    // Debounce: save at most every 5 seconds unless forced
-    if (!force && (saving || (now - lastSave) < 5000)) {
+// Save state to IndexedDB
+async function saveState() {
+    // Prevent concurrent saves
+    if (saving) {
         return;
     }
 
     saving = true;
 
     try {
-        if (!dirty && !force) {
-            saving = false;
-            return;
-        }
-
+        const now = Date.now();
         const stateToSave = {
             sessions,
             quotas,
@@ -180,7 +188,7 @@ async function saveState(force = false) {
         };
 
         // Basic validation
-        if (!validateState(stateToSave) && !force) {
+        if (!validateState(stateToSave)) {
             throw new Error('State validation failed - refusing to write corrupted data');
         }
 
@@ -193,13 +201,7 @@ async function saveState(force = false) {
             await saveUsageToIDB(today, usage[today]);
         }
 
-        lastSave = now;
-        dirty = false;
-
         console.log('[SaveState] State saved to IndexedDB');
-    } catch (e) {
-        console.error('[SaveState] Save failed:', e);
-        dirty = true;
     } finally {
         saving = false;
     }
@@ -492,24 +494,26 @@ async function startSession(host, type, durationMs) {
 // Message handler
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'checkAccess') {
-        evaluateAccess(request.host).then(sendResponse);
+        ensureReady().then(() => evaluateAccess(request.host)).then(sendResponse);
         return true;
     } else if (request.action === 'startSession') {
-        startSession(request.host, request.type, request.durationMs).then(sendResponse);
+        ensureReady().then(() => startSession(request.host, request.type, request.durationMs)).then(sendResponse);
         return true;
     } else if (request.action === 'recordUsage') {
         // Handle usage reports from content scripts
-        const { host, seconds } = request;
-        const today = getDateKey();
+        ensureReady().then(() => {
+            const { host, seconds } = request;
+            const today = getDateKey();
 
-        if (!usage[today]) usage[today] = {};
-        const milliseconds = seconds * 1000;
-        usage[today][host] = (usage[today][host] || 0) + milliseconds;
+            if (!usage[today]) usage[today] = {};
+            const milliseconds = seconds * 1000;
+            usage[today][host] = (usage[today][host] || 0) + milliseconds;
 
-        console.log(`[RecordUsage] ${host}: +${seconds}s, total today: ${Math.round(usage[today][host]/1000)}s`);
+            console.log(`[RecordUsage] ${host}: +${seconds}s, total today: ${Math.round(usage[today][host]/1000)}s`);
 
-        // Save immediately after receiving usage update
-        saveState().then(() => {
+            // Save immediately after receiving usage update
+            return saveState();
+        }).then(() => {
             sendResponse({ success: true });
         }).catch(error => {
             console.error('[RecordUsage] Save failed:', error);
@@ -518,19 +522,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         return true; // Keep message channel open for async response
     } else if (request.action === 'getUsage') {
-        const today = getDateKey();
-        const todayUsage = usage[today] || {};
-        console.log('[GetUsage] Returning data for', today, 'with', Object.keys(todayUsage).length, 'domains');
-        sendResponse({ usage: todayUsage });
+        ensureReady().then(() => {
+            const today = getDateKey();
+            const todayUsage = usage[today] || {};
+            console.log('[GetUsage] Returning data for', today, 'with', Object.keys(todayUsage).length, 'domains');
+            sendResponse({ usage: todayUsage });
+        });
+        return true;
     } else if (request.action === 'getCurrentSite') {
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            if (tabs[0] && tabs[0].url) {
-                const host = getHost(tabs[0].url);
-                const siteInfo = getSiteInfo(host);
-                sendResponse({ host, siteInfo });
-            } else {
-                sendResponse({ host: null, siteInfo: null });
-            }
+        ensureReady().then(() => {
+            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                if (tabs[0] && tabs[0].url) {
+                    const host = getHost(tabs[0].url);
+                    const siteInfo = getSiteInfo(host);
+                    sendResponse({ host, siteInfo });
+                } else {
+                    sendResponse({ host: null, siteInfo: null });
+                }
+            });
         });
         return true;
     }

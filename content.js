@@ -75,7 +75,9 @@
                     seconds: unreported
                 });
                 if (result?.success) lastReportedSeconds += unreported;
-            } catch {}
+            } catch (e) {
+                console.error('[RecordUsage] Failed on visibility change:', e);
+            }
         }
     });
 
@@ -99,7 +101,9 @@
                         seconds: delta
                     });
                     if (result?.success) lastReportedSeconds += delta;
-                } catch {}
+                } catch (e) {
+                    console.error('[RecordUsage] Failed on interval:', e);
+                }
             }
         }
     }, 1000);
