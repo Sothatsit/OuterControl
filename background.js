@@ -157,21 +157,6 @@ async function loadState() {
         usage = migrated.usage || {};
         exportSettings = migrated.exportSettings || null;
 
-        // Restore active tab tracking if it was saved
-        if (chosen.activeTabState) {
-            const now = Date.now();
-            const timeSinceLastSave = now - chosen.activeTabState.savedAt;
-
-            // If less than 1 minute since last save, resume tracking
-            if (timeSinceLastSave < 60000) {
-                activeTab = {
-                    host: chosen.activeTabState.host,
-                    since: now - timeSinceLastSave
-                };
-                console.log('[LoadState] Resumed tracking for:', activeTab.host, 'with', timeSinceLastSave, 'ms gap');
-            }
-        }
-
         // Clean expired sessions
         const now = Date.now();
         for (const key in sessions) {
@@ -247,8 +232,7 @@ async function saveState(force = false) {
             usage,
             exportSettings,
             lastSaved: now,
-            dataVersion: '3.0.0',
-            activeTabState: activeTab ? { host: activeTab.host, savedAt: now } : null
+            dataVersion: '3.0.0'
         };
 
         // Basic validation (unchanged)
