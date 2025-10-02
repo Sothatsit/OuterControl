@@ -5,6 +5,7 @@ const group = params.get('group');
 const reason = params.get('reason');
 const lunchAvailable = params.get('lunchAvailable') === 'true';
 const startVisit = params.get('startVisit') === 'true';
+const graceMs = Number(params.get('graceMs')) || 0;
 
 // Display group and reason
 document.getElementById('group-name').textContent = `Group: ${group}`;
@@ -16,7 +17,7 @@ const rules = {
     social: `
     <ul>
       <li>Blocked 24/7</li>
-      <li>3-minute grace periods available with code entry</li>
+      <li>5-minute grace periods available with code entry</li>
       <li>Includes: Reddit, Twitter/X</li>
     </ul>
   `,
@@ -114,7 +115,7 @@ document.getElementById('grace-button').addEventListener('click', async () => {
         action: 'startSession',
         host: host,
         type: 'grace',
-        durationMs: 3 * 60 * 1000
+        durationMs: graceMs
     });
 
     if (result.success) {

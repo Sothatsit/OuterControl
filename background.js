@@ -3,7 +3,7 @@ const POLICIES = {
     social: {
         hosts: ['reddit.com', 'twitter.com', 'x.com'],
         blockAlways: true,
-        graceDurationMs: 3 * 60 * 1000
+        graceDurationMs: 5 * 60 * 1000
     },
     streaming: {
         hosts: ['youtube.com', 'disneyplus.com', 'paramountplus.com', 'max.com', 'hbomax.com', 'netflix.com'],
@@ -472,7 +472,8 @@ async function evaluateAccess(host) {
         return {
             allow: false,
             group,
-            reason: 'Always blocked. 5-minute grace available.'
+            reason: 'Always blocked. 5-minute grace available.',
+            graceDurationMs: config.graceDurationMs
         };
     }
 
@@ -505,13 +506,15 @@ async function evaluateAccess(host) {
                         allow: false,
                         group,
                         reason: 'Daily allowance used. Lunch session available.',
-                        lunchAvailable: true
+                        lunchAvailable: true,
+                        graceDurationMs: config.graceDurationMs
                     };
                 }
                 return {
                     allow: false,
                     group,
-                    reason: 'Daily 1-hour allowance exhausted. Blocked during work hours.'
+                    reason: 'Daily 1-hour allowance exhausted. Blocked during work hours.',
+                    graceDurationMs: config.graceDurationMs
                 };
             } else {
                 // Still within allowance
@@ -572,7 +575,8 @@ async function evaluateAccess(host) {
         return {
             allow: false,
             group,
-            reason: `Quota exceeded. Next visit at ${new Date(nextAllowed).toLocaleTimeString()}`
+            reason: `Quota exceeded. Next visit at ${new Date(nextAllowed).toLocaleTimeString()}`,
+            graceDurationMs: config.graceDurationMs
         };
     }
 
