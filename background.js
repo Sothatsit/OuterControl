@@ -1,26 +1,35 @@
+// Import shared modules
+import { MIN, HOUR } from './lib/constants.js';
+import { getDateKey } from './lib/time.js';
+import { generateCSV } from './lib/csv.js';
+import { buildDomainMap, lookupGroup } from './lib/domains.js';
+
 // Configuration
 const POLICIES = {
     social: {
         hosts: ['reddit.com', 'twitter.com', 'x.com'],
         blockAlways: true,
-        graceDurationMs: 5 * 60 * 1000
+        graceDurationMs: 5 * MIN
     },
     streaming: {
         hosts: ['youtube.com', 'disneyplus.com', 'paramountplus.com', 'max.com', 'hbomax.com', 'netflix.com'],
         workHours: { start: 9, end: 18 },
         workDays: [1, 2, 3, 4, 5], // Mon-Fri
         lunchWindow: { start: 12, end: 14 },
-        lunchDurationMs: 30 * 60 * 1000,
-        graceDurationMs: 5 * 60 * 1000
+        lunchDurationMs: 30 * MIN,
+        graceDurationMs: 5 * MIN
     },
     hackerNews: {
         hosts: ['news.ycombinator.com'],
         maxVisits: 3,
-        windowMs: 3 * 60 * 60 * 1000,
-        visitDurationMs: 5 * 60 * 1000,
-        graceDurationMs: 5 * 60 * 1000
+        windowMs: 3 * HOUR,
+        visitDurationMs: 5 * MIN,
+        graceDurationMs: 5 * MIN
     }
 };
+
+// Build domain map for fast lookups
+const domainMap = buildDomainMap(POLICIES);
 
 // State management
 let sessions = {};
@@ -417,13 +426,6 @@ function clearErrorBadge() {
     chrome.action.setTitle({ title: 'Outside-Control' });
 }
 
-// Get date key (YYYY-MM-DD) in local timezone
-function getDateKey(date = new Date()) {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-}
 
 // Get host from URL
 function getHost(url) {
@@ -435,22 +437,11 @@ function getHost(url) {
     }
 }
 
-// Get domain group
-function getDomainGroup(host) {
-    for (const [group, config] of Object.entries(POLICIES)) {
-        for (const domain of config.hosts) {
-            if (host === domain || host.endsWith('.' + domain)) {
-                return { group, config };
-            }
-        }
-    }
-    return null;
-}
 
 // Evaluate access
 async function evaluateAccess(host) {
     const now = Date.now();
-    const domainInfo = getDomainGroup(host);
+    const domainInfo = lookupGroup(host, domainMap);
 
     if (!domainInfo) {
         return { allow: true };
@@ -494,11 +485,10 @@ async function evaluateAccess(host) {
 
         // During work hours: check 1-hour daily allowance
         const firstAccess = streamingFirstAccess[today];
-        const ONE_HOUR_MS = 60 * 60 * 1000;
 
         if (firstAccess) {
             const timeSinceFirst = now - firstAccess;
-            if (timeSinceFirst >= ONE_HOUR_MS) {
+            if (timeSinceFirst >= HOUR) {
                 // 1-hour allowance used up during work hours
                 // Check lunch window
                 if (hour >= config.lunchWindow.start && hour < config.lunchWindow.end && !lunchUsed[today]) {
@@ -518,7 +508,7 @@ async function evaluateAccess(host) {
                 };
             } else {
                 // Still within allowance
-                const remainingMs = ONE_HOUR_MS - timeSinceFirst;
+                const remainingMs = HOUR - timeSinceFirst;
                 return {
                     allow: true,
                     group,
@@ -532,7 +522,7 @@ async function evaluateAccess(host) {
             return {
                 allow: true,
                 group,
-                allowanceRemaining: ONE_HOUR_MS
+                allowanceRemaining: HOUR
             };
         }
     }
@@ -586,7 +576,7 @@ async function evaluateAccess(host) {
 // Get site info for current tab
 function getSiteInfo(host) {
     const now = Date.now();
-    const domainInfo = getDomainGroup(host);
+    const domainInfo = lookupGroup(host, domainMap);
 
     if (!domainInfo) {
         return null;
@@ -610,11 +600,10 @@ function getSiteInfo(host) {
         const day = date.getDay();
         const today = getDateKey();
         const firstAccess = streamingFirstAccess[today];
-        const ONE_HOUR_MS = 60 * 60 * 1000;
 
         if (firstAccess) {
             const timeSinceFirst = now - firstAccess;
-            const remainingMs = ONE_HOUR_MS - timeSinceFirst;
+            const remainingMs = HOUR - timeSinceFirst;
 
             if (remainingMs > 0) {
                 info.allowanceRemaining = Math.ceil(remainingMs / 1000);
@@ -816,31 +805,10 @@ async function initializeState() {
     }
 }
 
-// Generate CSV content
-function generateCSV(date) {
-    const data = usage[date] || {};
-    console.log('Generating CSV for date:', date, 'data:', data);
-
-    // Convert to array and sort by time
-    const rows = Object.entries(data)
-        .map(([domain, ms]) => ({ domain, seconds: Math.round(ms / 1000) }))
-        .sort((a, b) => b.seconds - a.seconds);
-
-    console.log('CSV rows:', rows);
-
-    // Generate CSV
-    let csv = 'date,domain,total_seconds\n';
-    for (const row of rows) {
-        csv += `${date},${row.domain},${row.seconds}\n`;
-    }
-
-    console.log('Generated CSV content:', csv);
-    return csv;
-}
 
 // Export CSV (manual) - use data URL instead of blob URL for service worker compatibility
 async function exportCSV(date) {
-    const csv = generateCSV(date);
+    const csv = generateCSV(date, usage[date]);
 
     // Create data URL (works in service worker context)
     const dataUrl = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
@@ -926,7 +894,7 @@ async function autoExportCSV(date) {
     }
 
     try {
-        const csv = generateCSV(date);
+        const csv = generateCSV(date, usage[date]);
         const filename = `outside-control-usage-${date}.csv`;
 
         // Try background write first (if persistent permission is available)
