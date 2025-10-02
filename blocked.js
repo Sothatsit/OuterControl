@@ -5,7 +5,7 @@ const reason = params.get('reason');
 const lunchAvailable = params.get('lunchAvailable') === 'true';
 const graceMs = Number(params.get('graceMs')) || 0;
 
-document.getElementById('group-name').textContent = `Group: ${group}`;
+document.getElementById('group-name').textContent = `Blocking Group: ${group}`;
 document.getElementById('reason').textContent = reason || 'Access restricted';
 
 const rulesText = document.getElementById('rules-text');
@@ -67,6 +67,10 @@ function generateCode() {
     currentCode = newCode;
 
     const canvas = document.getElementById('code-canvas');
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width;
+    canvas.height = 50;
+
     const ctx = canvas.getContext('2d');
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -80,12 +84,6 @@ function generateCode() {
 if (document.getElementById('grace-section').style.display !== 'none') {
     generateCode();
 }
-
-// Prevent copy/paste
-document.getElementById('code-input').addEventListener('paste', (e) => {
-    e.preventDefault();
-    return false;
-});
 
 document.getElementById('grace-button').addEventListener('click', async () => {
     const input = document.getElementById('code-input').value.toUpperCase();

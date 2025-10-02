@@ -61,36 +61,36 @@ async function loadCurrentSite() {
     const container = document.getElementById('site-info');
 
     if (!response.host) {
-        container.innerHTML = '<div class="no-data">No active site</div>';
+        container.innerHTML = '<p class="no-data">No active site</p>';
         return;
     }
 
-    let html = `<div><strong>${response.host}</strong></div>`;
+    let html = `<p><strong>${response.host}</strong></p>`;
 
     if (response.siteInfo) {
         const info = response.siteInfo;
 
         if (info.sessionRemaining) {
-            html += `<div class="status info">Session active: ${formatTimeRemaining(info.sessionRemaining)} remaining</div>`;
+            html += `<p class="status info">Session active: ${formatTimeRemaining(info.sessionRemaining)} remaining</p>`;
         }
 
         if (info.group === 'hackerNews') {
             if (info.visitsRemaining !== undefined) {
-                html += `<div class="status success">${info.visitsRemaining} visits remaining</div>`;
+                html += `<p class="status success">${info.visitsRemaining} visits remaining</p>`;
             }
             if (info.resetIn) {
-                html += `<div class="status warning">Quota resets in ${formatTimeRemaining(info.resetIn)}</div>`;
+                html += `<p class="status warning">Quota resets in ${formatTimeRemaining(info.resetIn)}</p>`;
             }
         } else if (info.group === 'streaming') {
-            html += `<div class="status ${info.status.includes('Blocked') ? 'warning' : 'success'}">${info.status}</div>`;
+            html += `<p class="status ${info.status.includes('Blocked') ? 'warning' : 'success'}">${info.status}</p>`;
             if (info.lunchAvailable) {
-                html += `<div class="status info">Lunch session available</div>`;
+                html += `<p class="status info">Lunch session available</p>`;
             }
         } else if (info.group === 'social') {
-            html += `<div class="status warning">${info.status}</div>`;
+            html += `<p class="status warning">${info.status}</p>`;
         }
     } else {
-        html += '<div class="status">Not restricted</div>';
+        html += '<p class="status">Not restricted</p>';
     }
 
     container.innerHTML = html;
@@ -113,7 +113,7 @@ async function loadUsage() {
         const container = document.getElementById('usage-table');
 
         if (sites.length === 0) {
-            container.innerHTML = '<div class="no-data">No usage data yet today</div>';
+            container.innerHTML = '<p class="no-data">No usage data yet today</p>';
             return;
         }
 
@@ -130,7 +130,7 @@ async function loadUsage() {
         container.innerHTML = html;
     } catch (error) {
         console.error('Failed to load usage:', error);
-        container.innerHTML = '<div class="no-data">Error loading usage data</div>';
+        container.innerHTML = '<p class="no-data">Error loading usage data</p>';
     }
 }
 

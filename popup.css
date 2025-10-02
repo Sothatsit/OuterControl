@@ -1,0 +1,103 @@
+@import url('base.css');
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    padding: 20px;
+    width: 500px;
+    min-height: 600px;
+    margin: 0;
+    background: var(--color-bg-50);
+}
+
+h1 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+h1 .logo {
+    width: 32px;
+    height: 32px;
+    object-fit: contain;
+}
+
+
+.current-site .status {
+    margin: 8px 0;
+}
+
+.current-site .warning {
+    color: var(--color-error-70);
+}
+
+.current-site .success {
+    color: var(--color-success-90);
+}
+
+.current-site .info {
+    color: var(--color-text-95);
+}
+
+button {
+    background: var(--color-success-50);
+    color: var(--color-text-95);
+    border: none;
+    padding: 10px 20px;
+    border-radius: 4px;
+    cursor: pointer;
+    margin: 5px 5px 5px 0;
+}
+
+button:hover {
+    background: var(--color-success-hover);
+}
+
+button.secondary {
+    background: var(--color-button-50);
+}
+
+button.secondary:hover {
+    background: var(--color-button-hover);
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+}
+
+th, td {
+    padding: 8px;
+    text-align: left;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    color: var(--color-text-95);
+}
+
+th {
+    background: var(--color-accent-30);
+    font-weight: 600;
+    color: var(--color-text-95);
+}
+
+.time {
+    font-family: monospace;
+    text-align: right;
+}
+
+.folder-status {
+    margin: 10px 0;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+}
+
+.folder-status.configured {
+    background: var(--color-success-90);
+}
+
+.no-data {
+    color: var(--color-text-90);
+    font-style: italic;
+    padding: 20px;
+    text-align: center;
+}

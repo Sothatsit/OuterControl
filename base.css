@@ -1,0 +1,93 @@
+:root {
+  --color-bg-20: #D5D4B8;
+  --color-bg-30: #E2E1CC;
+  --color-bg-40: #F0EFDC;
+  --color-bg-50: #FFFFF8;
+  --color-bg-60: #FFFFFA;
+  --color-bg-70: #FFFFFC;
+  --color-bg-80: #FFFFFE;
+
+  --color-accent-10: #2A5F70;
+  --color-accent-20: #3F7888;
+  --color-accent-30: #5599AA;
+  --color-accent-40: #6FAABC;
+  --color-accent-50: #8ABCCF;
+  --color-accent-60: #A0CCDC;
+  --color-accent-70: #B5D9E6;
+  --color-accent-80: #CAE6F0;
+  --color-accent-90: #E0F2F8;
+
+  --color-button-50: #2E8CAD;
+  --color-button-hover: #257A9B;
+
+  --color-text-10: #222222;
+  --color-text-20: #333333;
+  --color-text-30: #555555;
+  --color-text-50: #888888;
+  --color-text-70: #AAAAAA;
+  --color-text-90: #EEEEEE;
+  --color-text-95: #FFFFFF;
+
+  --color-success-30: #2E7D32;
+  --color-success-40: #388E3C;
+  --color-success-50: #4CAF50;
+  --color-success-60: #66BB6A;
+  --color-success-70: #81C784;
+  --color-success-90: #E8F5E9;
+
+  --color-success-hover: #45A049;
+
+  --color-error-30: #C62828;
+  --color-error-40: #E53935;
+  --color-error-50: #FF4444;
+  --color-error-60: #EF5350;
+  --color-error-70: #E57373;
+}
+
+h1 {
+  font-size: 2rem;
+  margin-top: 0;
+  color: var(--color-accent-40);
+}
+
+h2 {
+  font-size: 1.5rem;
+  margin-top: 0;
+  color: var(--color-text-95);
+}
+
+h3 {
+  font-size: 1.25rem;
+  margin-top: 0;
+  color: var(--color-text-95);
+}
+
+p {
+  font-size: 1.1rem;
+  color: var(--color-text-95);
+}
+
+ul, ol, li {
+  font-size: 1.1rem;
+}
+
+td, th {
+  font-size: 1.1rem;
+}
+
+input {
+  font-size: 1.1rem;
+}
+
+button {
+  font-size: 1rem;
+}
+
+.section {
+  background: var(--color-accent-40);
+  padding: 15px;
+  margin: 15px 0;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  color: var(--color-text-95);
+}

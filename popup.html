@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Usage Tracker - Outside Control</title>
+    <link rel="stylesheet" href="popup.css">
+    <script src="lib/jszip.min.js"></script>
+</head>
+<body>
+<h1><img src="logo.png" alt="Outer-Control Logo" class="logo">Outer-Control</h1>
+
+<div class="section current-site">
+    <h2>Current Site</h2>
+    <div id="site-info">
+        <p class="no-data">Loading...</p>
+    </div>
+</div>
+
+<div class="section">
+    <h2>Today's Usage</h2>
+    <div class="usage-table" id="usage-table">
+        <p class="no-data">No usage data yet today</p>
+    </div>
+</div>
+
+<div class="section">
+    <h2>Export Data</h2>
+    <p style="margin: 0 0 10px 0;">
+        Download a ZIP file containing a CSV for each day with usage data
+    </p>
+    <button id="download-zip" class="secondary">Download All Usage (ZIP)</button>
+</div>
+
+<script type="module" src="popup.js"></script>
+</body>
+</html>
