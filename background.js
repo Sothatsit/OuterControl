@@ -309,16 +309,18 @@ async function saveState(force = false) {
     }
 }
 
-// Setup alarms
-function setupAlarms() {
-    // Midnight rollover
+// Schedule next midnight alarm
+function scheduleMidnight() {
     const now = new Date();
     const midnight = new Date(now);
     midnight.setHours(24, 0, 0, 0);
-    const msUntilMidnight = midnight.getTime() - now.getTime();
+    chrome.alarms.create('midnight', { when: midnight.getTime() });
+}
 
-    chrome.alarms.create('midnight', { when: Date.now() + msUntilMidnight });
-    chrome.alarms.create('midnightRepeating', { periodInMinutes: 24 * 60 });
+// Setup alarms
+function setupAlarms() {
+    // Midnight rollover
+    scheduleMidnight();
 
     // Save usage and auto-export every 5 minutes
     chrome.alarms.create('saveUsage', { periodInMinutes: 5 });
@@ -326,7 +328,7 @@ function setupAlarms() {
 
 // Alarm handler
 chrome.alarms.onAlarm.addListener(async (alarm) => {
-    if (alarm.name === 'midnight' || alarm.name === 'midnightRepeating') {
+    if (alarm.name === 'midnight') {
         await handleMidnight();
     } else if (alarm.name === 'saveUsage') {
         // Retry failed saves first
@@ -373,6 +375,9 @@ async function handleMidnight() {
     }
 
     await saveState();
+
+    // Schedule next midnight
+    scheduleMidnight();
 }
 
 // Get browser name - async to handle Brave's Promise-based API
