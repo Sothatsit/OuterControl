@@ -38,9 +38,7 @@ let lunchUsed = {};
 let streamingFirstAccess = {}; // Track first streaming access time per day
 let usage = {};
 let exportSettings = null;
-let lastSaveTime = Date.now();
 let stateHealthy = false; // Only true after successful load from file
-let unsavedChanges = false; // Track if we have changes that failed to save
 
 // Initialize - fixed race condition by ensuring loadState completes first
 chrome.runtime.onInstalled.addListener(async (details) => {
@@ -183,9 +181,10 @@ async function loadState() {
     }
 }
 
-// Save queue to prevent concurrent saves
-let saveQueue = null;
-let isSaving = false;
+// Debounced save state
+let dirty = false;
+let saving = false;
+let lastSave = 0;
 let fileSaveRetryCount = 0;
 const MAX_FILE_SAVE_RETRIES = 3;
 
@@ -216,23 +215,24 @@ function validateState(state) {
     return true;
 }
 
-// Save state - chrome.storage.local primary, FSA secondary
+// Save state - debounced to save at most every 5 seconds
 async function saveState(force = false) {
-    // Queue save if one is already in progress
-    if (isSaving) {
-        if (!saveQueue) {
-            saveQueue = setTimeout(() => {
-                saveQueue = null;
-                saveState(force);
-            }, 100);
-        }
+    dirty = true;
+    const now = Date.now();
+
+    // Debounce: save at most every 5 seconds unless forced
+    if (!force && (saving || (now - lastSave) < 5000)) {
         return;
     }
 
-    isSaving = true;
+    saving = true;
 
     try {
-        const now = Date.now();
+        if (!dirty && !force) {
+            saving = false;
+            return;
+        }
+
         const stateToSave = {
             sessions,
             quotas,
@@ -256,11 +256,11 @@ async function saveState(force = false) {
         // 2) Best-effort file persistence via offscreen (optional/secondary)
         const canUseFSA = exportSettings && exportSettings.directoryHandle;
         if (!canUseFSA) {
-            lastSaveTime = now;
-            unsavedChanges = false;
+            lastSave = now;
+            dirty = false;
             stateHealthy = true; // State is healthy if we can save to chrome.storage
             clearErrorBadge();
-            isSaving = false;
+            saving = false;
             return;
         }
 
@@ -272,9 +272,9 @@ async function saveState(force = false) {
         });
 
         if (writeResult && writeResult.success) {
-            lastSaveTime = now;
+            lastSave = now;
             fileSaveRetryCount = 0;
-            unsavedChanges = false;
+            dirty = false;
             stateHealthy = true;
             clearErrorBadge();
             console.log('[SaveState] State saved to both chrome.storage.local and file at', new Date(now).toISOString());
@@ -289,8 +289,8 @@ async function saveState(force = false) {
             const test = await chrome.storage.local.get('outsideControl.state');
             if (test['outsideControl.state']) {
                 console.log('[SaveState] chrome.storage.local save succeeded, file write failed (non-critical)');
-                lastSaveTime = Date.now();
-                unsavedChanges = false;
+                lastSave = Date.now();
+                dirty = false;
                 stateHealthy = true;
 
                 // Schedule a retry with alarms (survives worker termination)
@@ -302,7 +302,7 @@ async function saveState(force = false) {
                 } else {
                     showErrorBadge('File not saved - local data safe');
                 }
-                isSaving = false;
+                saving = false;
                 return;
             }
         } catch (testError) {
@@ -310,11 +310,11 @@ async function saveState(force = false) {
         }
 
         // Both failed - this is critical
-        unsavedChanges = true;
+        dirty = true;
         stateHealthy = false;
         showErrorBadge('Storage error - data not saved');
     } finally {
-        isSaving = false;
+        saving = false;
     }
 }
 
@@ -340,11 +340,6 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     if (alarm.name === 'midnight') {
         await handleMidnight();
     } else if (alarm.name === 'saveUsage') {
-        // Retry failed saves first
-        if (unsavedChanges) {
-            console.log('[Alarm] Retrying save for unsaved changes');
-            fileSaveRetryCount = 0; // Reset retry count for fresh attempt
-        }
         await saveState();
         // Auto-export current day if configured
         if (exportSettings && exportSettings.autoExport) {
