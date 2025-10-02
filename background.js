@@ -1,7 +1,35 @@
-import { MIN, HOUR } from './lib/constants.js';
-import { getDateKey } from './lib/time.js';
-import { buildDomainMap, lookupGroup } from './lib/domains.js';
-import { saveStateToIDB, loadStateFromIDB, saveUsageToIDB, loadUsageForDate } from './lib/idb.js';
+import { getDateKey } from './common/time.js';
+import { saveStateToIDB, loadStateFromIDB, saveUsageToIDB, loadUsageForDate } from './common/idb.js';
+
+const SEC = 1000;
+const MIN = 60 * SEC;
+const HOUR = 60 * MIN;
+
+function buildDomainMap(policies) {
+    const map = new Map();
+    for (const [group, config] of Object.entries(policies)) {
+        for (const domain of config.hosts) {
+            map.set(domain, { group, config });
+        }
+    }
+    return map;
+}
+
+function lookupGroup(host, domainMap) {
+    if (domainMap.has(host)) {
+        return domainMap.get(host);
+    }
+
+    const parts = host.split('.');
+    for (let i = 1; i < parts.length - 1; i++) {
+        const suffix = parts.slice(i).join('.');
+        if (domainMap.has(suffix)) {
+            return domainMap.get(suffix);
+        }
+    }
+
+    return null;
+}
 
 const POLICIES = {
     social: {
@@ -407,8 +435,11 @@ function getSiteInfo(host) {
         const day = date.getDay();
         const today = getDateKey();
         const firstAccess = streamingFirstAccess[today];
+        const isWorkHours = config.workDays.includes(day) && hour >= config.workHours.start && hour < config.workHours.end;
 
-        if (firstAccess) {
+        if (!isWorkHours) {
+            info.status = 'Not blocked (outside work hours)';
+        } else if (firstAccess) {
             const timeSinceFirst = now - firstAccess;
             const remainingMs = HOUR - timeSinceFirst;
 
@@ -417,10 +448,8 @@ function getSiteInfo(host) {
                 info.status = `${Math.ceil(remainingMs / 60000)} min remaining of daily allowance`;
             } else {
                 info.status = 'Daily 1-hour allowance exhausted';
-                if (config.workDays.includes(day) && hour >= config.workHours.start && hour < config.workHours.end) {
-                    if (hour >= config.lunchWindow.start && hour < config.lunchWindow.end && !lunchUsed[today]) {
-                        info.lunchAvailable = true;
-                    }
+                if (hour >= config.lunchWindow.start && hour < config.lunchWindow.end && !lunchUsed[today]) {
+                    info.lunchAvailable = true;
                 }
             }
         } else {

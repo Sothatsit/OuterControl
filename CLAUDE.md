@@ -12,31 +12,38 @@ A Chrome extension (Manifest V3) for blocking distracting websites and tracking 
 - **blocked.html** - Page displayed when a site is blocked
 - **blocked.js** - Handles user interactions on the blocked page (grace periods, lunch sessions)
 - **blocked.css** - Styles for the blocked page
-- **giphy.gif** - Visual asset displayed on blocked page
 
 ### Extension Popup
 
-- **exports.html** - Extension popup interface showing current site status and usage statistics
-- **exports.js** - Handles export functionality, usage display, and folder selection
+- **popup.html** - Extension popup interface showing current site status and usage statistics
+- **popup.js** - Handles ZIP export and usage display
+- **popup.css** - Popup styles
 
-### File System Access
+### Offscreen Document
 
-- **offscreen.html** - Offscreen document for File System Access API operations
-- **offscreen.js** - Handles persistent file writing operations in background
-- **folder-picker.html** - Dedicated page for folder selection with user activation
-- **folder-picker.js** - Manages folder selection and persistent permission requests
+- **offscreen.html** - Offscreen document for persistence operations
+- **offscreen.js** - Requests persistent storage permission at startup
+
+### Shared Resources
+
+- **common/base.css** - Shared CSS variables and base styles
+- **common/time.js** - Time formatting and date utilities
+- **common/idb.js** - IndexedDB storage operations
+- **common/jszip.min.js** - Third-party library for ZIP file generation
+- **res/giphy.gif** - Block page GIF
+- **res/logo.png** - Extension logo
 
 ## Functionality Summary
 
 ### background.js
 - Manages three blocking policies:
-  - **Social media** (Reddit, Twitter/X): Always blocked, 3-minute grace periods
+  - **Social media** (Reddit, Twitter/X): Always blocked, 5-minute grace periods
   - **Streaming** (YouTube, Disney+, etc.): Blocked during work hours (Mon-Fri 9am-6pm) after 1-hour daily allowance, 30-minute lunch sessions available (12-2pm), 5-minute grace periods
   - **Hacker News**: 3 visits per 3-hour window, 5-minute visit duration, 5-minute grace periods
 - Tracks time spent on all websites
-- Stores usage data in Chrome storage and exports to file system
+- Stores usage data and state in IndexedDB
 - Handles session management for temporary access (grace periods, lunch, visits)
-- Auto-exports CSV files every 5 minutes to selected folder
+- Auto-saves state every 5 minutes
 - Manages alarms for midnight rollovers and periodic saves
 
 ### content.js
@@ -48,31 +55,25 @@ A Chrome extension (Manifest V3) for blocking distracting websites and tracking 
 ### blocked.js
 - Displays blocking reason and rules for each policy
 - Generates random codes for grace period verification (prevents copy/paste)
-- Handles grace period unlock (3 minutes for social, 5 minutes for streaming/HN)
+- Handles grace period unlock (5 minutes for all policies)
 - Manages lunch sessions (30-minute access during lunch hours for streaming)
-- Manages Hacker News visits (5-minute limited visits)
 
-### exports.js
+### popup.js
 - Displays current site status and blocking information
 - Shows daily usage statistics in table format
-- Manages CSV export to selected folder
-- Handles folder selection and permission management
-- Auto-saves usage data every 5 minutes when configured
+- Exports all usage data as a ZIP file containing CSV files for each day
 
 ### offscreen.js
-- Provides File System Access API operations in offscreen document context
-- Handles persistent permission for background file writes
-- Manages IndexedDB storage for directory handles
-
-### folder-picker.js
-- Provides dedicated page for folder selection with proper user activation
-- Manages two-step process: folder selection and persistent permission
-- Stores directory handles in IndexedDB
+- Requests persistent storage permission at startup
+- Sends result back to background script
 
 ## Data Storage
 
-- Usage data stored in Chrome local storage
-- Directory handles stored in IndexedDB
-- CSV files exported directly to user-selected folder
-- We want to fail fast. No limping along in the case of errors. Just fail.
-- Never ever add comments describing what changes you made.
+- All data stored in IndexedDB (sessions, quotas, usage data)
+- State saved every 5 minutes and on suspend
+- Usage data exported as ZIP download with CSV files
+
+## Development Guidelines
+
+- Fail fast - no limping along with errors
+- Never add comments describing what changes you made

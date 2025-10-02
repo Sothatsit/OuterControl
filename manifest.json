@@ -31,7 +31,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["blocked.html", "blocked.js", "blocked.css", "giphy.gif", "offscreen.html", "offscreen.js"],
+      "resources": ["blocked.html", "blocked.js", "blocked.css", "res/giphy.gif", "offscreen.html", "offscreen.js"],
       "matches": ["<all_urls>"]
     }
   ],
