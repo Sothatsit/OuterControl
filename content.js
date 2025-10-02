@@ -64,6 +64,21 @@
     let accumulatedSeconds = 0;
     let lastReportedSeconds = 0;
 
+    // Flush on visibility change (when tab becomes hidden)
+    document.addEventListener('visibilitychange', async () => {
+        if (document.visibilityState === 'hidden' && accumulatedSeconds > lastReportedSeconds) {
+            const unreported = accumulatedSeconds - lastReportedSeconds;
+            try {
+                const result = await chrome.runtime.sendMessage({
+                    action: 'recordUsage',
+                    host,
+                    seconds: unreported
+                });
+                if (result?.success) lastReportedSeconds += unreported;
+            } catch {}
+        }
+    });
+
     // Poll every 1 second - increment if visible (Brave blocks hasFocus, so just use visibility)
     setInterval(() => {
         const isVisible = document.visibilityState === 'visible';
