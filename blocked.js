@@ -4,7 +4,6 @@ const originalUrl = params.get('url');
 const group = params.get('group');
 const reason = params.get('reason');
 const lunchAvailable = params.get('lunchAvailable') === 'true';
-const startVisit = params.get('startVisit') === 'true';
 const graceMs = Number(params.get('graceMs')) || 0;
 
 // Display group and reason
@@ -34,7 +33,7 @@ const rules = {
     hackerNews: `
     <ul>
       <li>3 visits allowed every 3 hours</li>
-      <li>Each visit limited to 15 minutes</li>
+      <li>Each visit limited to 5 minutes</li>
       <li>5-minute grace periods available with code entry</li>
       <li>Applies to: news.ycombinator.com</li>
     </ul>
@@ -60,10 +59,6 @@ if (group) {
 
 if (lunchAvailable) {
     document.getElementById('lunch-section').style.display = 'block';
-}
-
-if (startVisit) {
-    document.getElementById('visit-section').style.display = 'block';
 }
 
 // Generate random code - declare variable first
@@ -131,22 +126,6 @@ if (document.getElementById('lunch-button')) {
             host: host,
             type: 'lunch',
             durationMs: 30 * 60 * 1000
-        });
-
-        if (result.success) {
-            window.location.href = originalUrl;
-        }
-    });
-}
-
-// HN visit
-if (document.getElementById('visit-button')) {
-    document.getElementById('visit-button').addEventListener('click', async () => {
-        const result = await chrome.runtime.sendMessage({
-            action: 'startSession',
-            host: host,
-            type: 'hnVisit',
-            durationMs: 15 * 60 * 1000
         });
 
         if (result.success) {

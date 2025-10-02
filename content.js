@@ -36,7 +36,6 @@
             '&group=' + response.group +
             '&reason=' + encodeURIComponent(response.reason || '') +
             '&lunchAvailable=' + (response.lunchAvailable || false) +
-            '&startVisit=' + (response.startVisit || false) +
             '&graceMs=' + (response.graceDurationMs || 0);
 
         window.location.replace(blockUrl);
