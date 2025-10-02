@@ -8,7 +8,6 @@
     "tabs",
     "alarms",
     "downloads",
-    "webNavigation",
     "offscreen"
   ],
   "host_permissions": ["<all_urls>"],
