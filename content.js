@@ -79,50 +79,30 @@
         }
     });
 
-    // Poll every 1 second - increment if visible (Brave blocks hasFocus, so just use visibility)
-    setInterval(() => {
-        const isVisible = document.visibilityState === 'visible';
+    // Single 1s ticker to accumulate and report every 10 ticks
+    let ticks = 0;
+    setInterval(async () => {
+        // Accumulate if visible
+        if (document.visibilityState === 'visible') {
+            accumulatedSeconds++;
+        }
 
-        if (isVisible) {
-            accumulatedSeconds += 1;
-            console.log('[Tracker] Tick:', host, 'accumulated:', accumulatedSeconds);
-        } else {
-            console.log('[Tracker] Not counting (visible:', isVisible, ')');
+        // Report every 10 ticks when visible
+        ticks++;
+        if (ticks % 10 === 0 && document.visibilityState === 'visible') {
+            const delta = accumulatedSeconds - lastReportedSeconds;
+            if (delta > 0) {
+                try {
+                    const result = await chrome.runtime.sendMessage({
+                        action: 'recordUsage',
+                        host,
+                        seconds: delta
+                    });
+                    if (result?.success) lastReportedSeconds += delta;
+                } catch {}
+            }
         }
     }, 1000);
-
-    // Report every 10 seconds (only if we have unreported time AND we're currently visible)
-    setInterval(async () => {
-        const unreportedSeconds = accumulatedSeconds - lastReportedSeconds;
-
-        console.log('[Tracker] Report interval - unreported:', unreportedSeconds, 'visible:', document.visibilityState);
-
-        // Only send if we have new time AND we're currently visible
-        if (unreportedSeconds > 0 && document.visibilityState === 'visible') {
-
-            console.log('[Tracker] Sending usage report:', host, unreportedSeconds, 'seconds');
-            try {
-                const result = await chrome.runtime.sendMessage({
-                    action: 'recordUsage',
-                    host: host,
-                    seconds: unreportedSeconds
-                });
-
-                console.log('[Tracker] Report result:', result);
-
-                if (result && result.success) {
-                    // Subtract only the amount we successfully reported
-                    lastReportedSeconds += unreportedSeconds;
-                    console.log('[Tracker] Updated lastReported to:', lastReportedSeconds);
-                }
-            } catch (e) {
-                // Service worker might be restarting, will retry in 10s
-                console.log('[Tracker] Failed to report usage, will retry:', e);
-            }
-        } else {
-            console.log('[Tracker] Not sending (unreported <= 0 or not visible)');
-        }
-    }, 10000);
 
     console.log('[Tracker] Tracking initialized for:', host);
 })();
