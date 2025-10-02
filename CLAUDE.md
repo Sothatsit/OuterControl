@@ -74,3 +74,4 @@ A Chrome extension (Manifest V3) for blocking distracting websites and tracking 
 - Usage data stored in Chrome local storage
 - Directory handles stored in IndexedDB
 - CSV files exported directly to user-selected folder
+- We want to fail fast. No limping along in the case of errors. Just fail.

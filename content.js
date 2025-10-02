@@ -68,16 +68,12 @@
     document.addEventListener('visibilitychange', async () => {
         if (document.visibilityState === 'hidden' && accumulatedSeconds > lastReportedSeconds) {
             const unreported = accumulatedSeconds - lastReportedSeconds;
-            try {
-                const result = await chrome.runtime.sendMessage({
-                    action: 'recordUsage',
-                    host,
-                    seconds: unreported
-                });
-                if (result?.success) lastReportedSeconds += unreported;
-            } catch (e) {
-                console.error('[RecordUsage] Failed on visibility change:', e);
-            }
+            const result = await chrome.runtime.sendMessage({
+                action: 'recordUsage',
+                host,
+                seconds: unreported
+            });
+            if (result?.success) lastReportedSeconds += unreported;
         }
     });
 
@@ -94,16 +90,12 @@
         if (ticks % 10 === 0 && document.visibilityState === 'visible') {
             const delta = accumulatedSeconds - lastReportedSeconds;
             if (delta > 0) {
-                try {
-                    const result = await chrome.runtime.sendMessage({
-                        action: 'recordUsage',
-                        host,
-                        seconds: delta
-                    });
-                    if (result?.success) lastReportedSeconds += delta;
-                } catch (e) {
-                    console.error('[RecordUsage] Failed on interval:', e);
-                }
+                const result = await chrome.runtime.sendMessage({
+                    action: 'recordUsage',
+                    host,
+                    seconds: delta
+                });
+                if (result?.success) lastReportedSeconds += delta;
             }
         }
     }, 1000);

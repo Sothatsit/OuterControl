@@ -54,6 +54,40 @@ chrome.runtime.onStartup.addListener(async () => {
     await initialize();
 });
 
+// Helper function to ensure offscreen document exists
+async function ensureOffscreenDoc() {
+    if (!chrome.offscreen?.createDocument) return false;
+    const exists = await chrome.offscreen.hasDocument();
+    if (exists) return true;
+
+    await chrome.offscreen.createDocument({
+        url: 'offscreen.html',
+        reasons: ['BLOBS'],            // any allowed reason works; BLOBS is benign
+        justification: 'Request persistent storage once at startup'
+    });
+    return true;
+}
+
+// Helper function to wait for persistence result from offscreen document
+function waitForPersistenceResult(timeoutMs = 5000) {
+    return new Promise(async (resolve) => {
+        let timer = setTimeout(() => resolve({ granted: false, timeout: true }), timeoutMs);
+
+        const listener = (msg) => {
+            if (msg?.type === 'PERSISTENCE_RESULT') {
+                clearTimeout(timer);
+                chrome.runtime.onMessage.removeListener(listener);
+                resolve({ granted: !!msg.granted, error: msg.error, reason: msg.reason });
+            }
+        };
+        chrome.runtime.onMessage.addListener(listener);
+
+        // Kick off the offscreen doc
+        await ensureOffscreenDoc();
+        // offscreen.js runs immediately and posts back
+    });
+}
+
 // Unified initialization to prevent race conditions
 async function initialize() {
     // Create ready promise if not already created
@@ -63,11 +97,11 @@ async function initialize() {
         });
     }
 
-    // Request persistent storage
-    const isPersisted = await navigator.storage.persist();
-    console.log('[Init] Persistent storage:', isPersisted ? 'granted' : 'denied');
+    // Request persistent storage via offscreen document
+    const result = await waitForPersistenceResult();
+    console.log('[Init] Persistent storage:', result.granted ? 'granted' : 'not granted', result);
 
-    if (!isPersisted) {
+    if (!result.granted) {
         throw new Error('Persistent storage denied - extension cannot function properly');
     }
 
@@ -494,10 +528,16 @@ async function startSession(host, type, durationMs) {
 // Message handler
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'checkAccess') {
-        ensureReady().then(() => evaluateAccess(request.host)).then(sendResponse);
+        ensureReady().then(() => evaluateAccess(request.host)).then(sendResponse).catch(error => {
+            console.error('[CheckAccess] Failed:', error);
+            sendResponse({ allow: false, error: error.message });
+        });
         return true;
     } else if (request.action === 'startSession') {
-        ensureReady().then(() => startSession(request.host, request.type, request.durationMs)).then(sendResponse);
+        ensureReady().then(() => startSession(request.host, request.type, request.durationMs)).then(sendResponse).catch(error => {
+            console.error('[StartSession] Failed:', error);
+            sendResponse({ success: false, error: error.message });
+        });
         return true;
     } else if (request.action === 'recordUsage') {
         // Handle usage reports from content scripts
@@ -527,6 +567,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             const todayUsage = usage[today] || {};
             console.log('[GetUsage] Returning data for', today, 'with', Object.keys(todayUsage).length, 'domains');
             sendResponse({ usage: todayUsage });
+        }).catch(error => {
+            console.error('[GetUsage] Failed:', error);
+            sendResponse({ usage: {}, error: error.message });
         });
         return true;
     } else if (request.action === 'getCurrentSite') {
@@ -540,6 +583,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     sendResponse({ host: null, siteInfo: null });
                 }
             });
+        }).catch(error => {
+            console.error('[GetCurrentSite] Failed:', error);
+            sendResponse({ host: null, siteInfo: null, error: error.message });
         });
         return true;
     }
