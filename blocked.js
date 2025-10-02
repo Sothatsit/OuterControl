@@ -1,4 +1,3 @@
-// Parse URL parameters
 const params = new URLSearchParams(window.location.search);
 const originalUrl = params.get('url');
 const group = params.get('group');
@@ -6,11 +5,9 @@ const reason = params.get('reason');
 const lunchAvailable = params.get('lunchAvailable') === 'true';
 const graceMs = Number(params.get('graceMs')) || 0;
 
-// Display group and reason
 document.getElementById('group-name').textContent = `Group: ${group}`;
 document.getElementById('reason').textContent = reason || 'Access restricted';
 
-// Display rules
 const rulesText = document.getElementById('rules-text');
 const rules = {
     social: `
@@ -41,7 +38,6 @@ const rules = {
 };
 rulesText.innerHTML = rules[group] || '<p>No specific rules defined</p>';
 
-// Get host from URL
 function getHost(url) {
     try {
         return new URL(url).hostname;
@@ -52,7 +48,6 @@ function getHost(url) {
 
 const host = getHost(originalUrl);
 
-// Show appropriate actions
 if (group) {
     document.getElementById('grace-section').style.display = 'block';
 }
@@ -61,7 +56,6 @@ if (lunchAvailable) {
     document.getElementById('lunch-section').style.display = 'block';
 }
 
-// Generate random code - declare variable first
 let currentCode = '';
 
 function generateCode() {
@@ -72,7 +66,6 @@ function generateCode() {
     }
     currentCode = newCode;
 
-    // Draw on canvas
     const canvas = document.getElementById('code-canvas');
     const ctx = canvas.getContext('2d');
 
@@ -84,7 +77,6 @@ function generateCode() {
     ctx.fillText(currentCode, canvas.width / 2, canvas.height / 2);
 }
 
-// Generate code if grace section is visible
 if (document.getElementById('grace-section').style.display !== 'none') {
     generateCode();
 }
@@ -95,7 +87,6 @@ document.getElementById('code-input').addEventListener('paste', (e) => {
     return false;
 });
 
-// Grace unlock
 document.getElementById('grace-button').addEventListener('click', async () => {
     const input = document.getElementById('code-input').value.toUpperCase();
 
@@ -118,7 +109,6 @@ document.getElementById('grace-button').addEventListener('click', async () => {
     }
 });
 
-// Lunch session
 if (document.getElementById('lunch-button')) {
     document.getElementById('lunch-button').addEventListener('click', async () => {
         const result = await chrome.runtime.sendMessage({

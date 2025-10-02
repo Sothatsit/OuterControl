@@ -7,20 +7,16 @@
 
     console.log('[Tracker] Content script loaded on:', host);
 
-    // Skip non-http(s) pages (chrome://, about:, file://, etc.)
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
         console.log('[Tracker] Skipping non-http(s) page:', url);
         return;
     }
 
-    // Skip if no hostname (shouldn't happen, but be safe)
     if (!host) {
         console.log('[Tracker] No hostname, skipping');
         return;
     }
 
-    // ========== BLOCKING LOGIC ==========
-    // Check access with background
     console.log('[Tracker] Checking access for:', host);
     const response = await chrome.runtime.sendMessage({
         action: 'checkAccess',
@@ -30,7 +26,6 @@
     console.log('[Tracker] Access response:', response);
 
     if (!response.allow) {
-        // Redirect to block page
         const blockUrl = chrome.runtime.getURL('blocked.html') +
             '?url=' + encodeURIComponent(url) +
             '&group=' + response.group +
@@ -49,7 +44,6 @@
         }, response.remainingMs);
     }
 
-    // Listen for session expiry
     chrome.runtime.onMessage.addListener((request) => {
         if (request.action === 'sessionExpired') {
             window.location.replace(chrome.runtime.getURL('blocked.html') +
@@ -59,7 +53,6 @@
         }
     });
 
-    // ========== TRACKING LOGIC ==========
     console.log('[Tracker] Starting tracking for:', host);
     let accumulatedSeconds = 0;
     let lastReportedSeconds = 0;
@@ -77,15 +70,13 @@
         }
     });
 
-    // Single 1s ticker to accumulate and report every 10 ticks
+    // 1s ticker: accumulate and report every 10 ticks
     let ticks = 0;
     setInterval(async () => {
-        // Accumulate if visible
         if (document.visibilityState === 'visible') {
             accumulatedSeconds++;
         }
 
-        // Report every 10 ticks when visible
         ticks++;
         if (ticks % 10 === 0 && document.visibilityState === 'visible') {
             const delta = accumulatedSeconds - lastReportedSeconds;

@@ -2,10 +2,8 @@ import { getAllUsageForExport } from './lib/idb.js';
 import { generateCSV } from './lib/csv.js';
 import { formatTime, formatTimeRemaining } from './lib/time.js';
 
-// Download ZIP with all usage data
 document.getElementById('download-zip').addEventListener('click', async () => {
     try {
-        // Get all usage data from IndexedDB
         const allUsage = await getAllUsageForExport();
 
         if (allUsage.length === 0) {
@@ -13,7 +11,6 @@ document.getElementById('download-zip').addEventListener('click', async () => {
             return;
         }
 
-        // Create ZIP file
         const zip = new JSZip();
 
         for (const entry of allUsage) {
@@ -22,7 +19,6 @@ document.getElementById('download-zip').addEventListener('click', async () => {
             zip.file(filename, csv);
         }
 
-        // Generate and download ZIP
         const blob = await zip.generateAsync({ type: 'blob' });
         const url = URL.createObjectURL(blob);
 
@@ -42,7 +38,6 @@ document.getElementById('download-zip').addEventListener('click', async () => {
     }
 });
 
-// Show toast notification
 function showToast(message) {
     const toast = document.createElement('div');
     toast.textContent = message;
@@ -61,7 +56,6 @@ function showToast(message) {
     setTimeout(() => toast.remove(), 3000);
 }
 
-// Load current site info
 async function loadCurrentSite() {
     const response = await chrome.runtime.sendMessage({ action: 'getCurrentSite' });
     const container = document.getElementById('site-info');
@@ -102,13 +96,11 @@ async function loadCurrentSite() {
     container.innerHTML = html;
 }
 
-// Load and display usage
 async function loadUsage() {
     try {
         const result = await chrome.runtime.sendMessage({ action: 'getUsage' });
         const usage = result.usage || {};
 
-        // Convert to array and sort
         const sites = Object.entries(usage)
             .map(([domain, ms]) => ({
                 domain,
@@ -116,9 +108,8 @@ async function loadUsage() {
                 formatted: formatTime(Math.round(ms / 1000))
             }))
             .sort((a, b) => b.seconds - a.seconds)
-            .slice(0, 50); // Top 50
+            .slice(0, 50);
 
-        // Display table
         const container = document.getElementById('usage-table');
 
         if (sites.length === 0) {
@@ -143,7 +134,6 @@ async function loadUsage() {
     }
 }
 
-// Initialize
 loadCurrentSite();
 loadUsage();
 
