@@ -8,8 +8,7 @@
     "unlimitedStorage",
     "tabs",
     "alarms",
-    "downloads",
-    "offscreen"
+    "downloads"
   ],
   "host_permissions": ["<all_urls>"],
   "background": {
