@@ -218,7 +218,7 @@ function setupAlarms() {
     // Midnight rollover
     scheduleMidnight();
 
-    // Save usage and auto-export every 5 minutes
+    // Save usage to IndexedDB every 5 minutes
     chrome.alarms.create('saveUsage', { periodInMinutes: 5 });
 }
 

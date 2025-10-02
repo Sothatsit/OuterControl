@@ -1,211 +1,44 @@
-import { getStoredHandle, storeHandle, openDB } from './lib/idb.js';
+import { getAllUsageForExport } from './lib/idb.js';
+import { generateCSV } from './lib/csv.js';
 import { formatTime, formatTimeRemaining } from './lib/time.js';
 
-let directoryHandle = null;
-
-// Load export settings
-async function loadExportSettings() {
-    console.log('Loading export settings...');
-    const response = await chrome.runtime.sendMessage({ action: 'getExportSettings' });
-    console.log('Export settings response:', response);
-
-    if (response.settings && response.settings.directoryHandle) {
-        console.log('Directory handle configured, attempting to restore...');
-        try {
-            // Restore handle from IndexedDB
-            directoryHandle = await getStoredHandle();
-            console.log('Restored directory handle:', directoryHandle);
-
-            if (directoryHandle) {
-                console.log('Handle exists with persistent permission');
-                updateFolderStatus(true);
-            } else {
-                console.log('No directory handle found in IndexedDB');
-                updateFolderStatus(false);
-            }
-        } catch (e) {
-            console.log('Could not restore directory handle:', e);
-            updateFolderStatus(false);
-        }
-    } else {
-        console.log('No directory handle configured');
-        updateFolderStatus(false);
-    }
-}
-
-// Show storage error state
-function showStorageError(message) {
-    const container = document.getElementById('usage-table');
-    container.innerHTML = `
-        <div class="no-data">
-            <div style="color: #e53e3e;">
-                ⚠️ Storage Error: ${message}
-            </div>
-            <div style="margin-top: 10px; font-size: 12px;">
-                Please check folder permissions or re-select the export folder.
-            </div>
-        </div>
-    `;
-}
-
-// Check if state system is healthy
-async function checkStateHealth() {
-    // The background script will tell us if state is healthy through export settings
-    const response = await chrome.runtime.sendMessage({ action: 'getExportSettings' });
-    return response.settings && response.settings.directoryHandle;
-}
-
-// Update folder status display
-function updateFolderStatus(configured) {
-    const status = document.getElementById('export-status');
-    const folderPath = document.getElementById('folder-path');
-    const openBtn = document.getElementById('open-folder');
-
-    if (configured) {
-        status.classList.add('configured');
-        folderPath.innerHTML = `
-      <div>✓ Auto-export configured</div>
-      <div>Files will be saved to the selected folder</div>
-      <div style="font-size: 11px; margin-top: 5px;">CSVs auto-save every 5 minutes</div>
-    `;
-        openBtn.style.display = 'inline-block';
-    } else {
-        status.classList.remove('configured');
-        folderPath.innerHTML = 'No folder selected - Click "Select Export Folder" to enable auto-export';
-        openBtn.style.display = 'none';
-    }
-}
-
-// Helper function to ensure offscreen document exists
-async function ensureOffscreenDocument() {
-    // Send a message to background to create offscreen if needed
-    await chrome.runtime.sendMessage({ action: 'ensureOffscreen' });
-}
-
-// Select folder - open tab for initial selection (requires user activation)
-document.getElementById('select-folder').addEventListener('click', async () => {
-    console.log('Select folder button clicked');
-
+// Download ZIP with all usage data
+document.getElementById('download-zip').addEventListener('click', async () => {
     try {
-        // Open folder picker page in a new tab
-        await chrome.tabs.create({
-            url: chrome.runtime.getURL('folder-picker.html'),
-            active: true
+        // Get all usage data from IndexedDB
+        const allUsage = await getAllUsageForExport();
+
+        if (allUsage.length === 0) {
+            showToast('No usage data to export');
+            return;
+        }
+
+        // Create ZIP file
+        const zip = new JSZip();
+
+        for (const entry of allUsage) {
+            const csv = generateCSV(entry.date, entry.data);
+            const filename = `outside-control-usage-${entry.date}.csv`;
+            zip.file(filename, csv);
+        }
+
+        // Generate and download ZIP
+        const blob = await zip.generateAsync({ type: 'blob' });
+        const url = URL.createObjectURL(blob);
+
+        await chrome.downloads.download({
+            url: url,
+            filename: 'outside-control-usage.zip',
+            saveAs: true
         });
 
-        // Close the popup
-        window.close();
+        showToast(`Exported ${allUsage.length} days of usage data`);
 
+        // Clean up object URL after a short delay
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) {
-        console.error('Error opening folder picker:', e);
-        showToast(`Failed to open folder picker: ${e.message}`);
-    }
-});
-
-
-
-// Open folder
-document.getElementById('open-folder').addEventListener('click', async () => {
-    if (!directoryHandle) return;
-
-    try {
-        // Try to verify permission first
-        const permission = await directoryHandle.queryPermission({ mode: 'read' });
-        if (permission !== 'granted') {
-            await directoryHandle.requestPermission({ mode: 'read' });
-        }
-
-        // Show folder by creating and opening a temp file
-        const tempFile = await directoryHandle.getFileHandle('.temp', { create: true });
-        await directoryHandle.removeEntry('.temp');
-
-        alert(`Files are in your selected export folder.\n\nPlease open this folder manually in Finder.`);
-    } catch (e) {
-        alert(`Files are in your selected export folder.\n\nPlease open this folder manually in Finder.`);
-    }
-});
-
-// Export today's CSV manually
-document.getElementById('export-today').addEventListener('click', async () => {
-    console.log('Export today button clicked');
-    console.log('Directory handle available:', !!directoryHandle);
-
-    if (directoryHandle) {
-        console.log('Using directory handle export');
-        const success = await writeCurrentDayCSV();
-        if (success) {
-            showToast('CSV exported successfully!');
-        } else {
-            // If directory export failed, try fallback download
-            console.log('Directory export failed, trying fallback download');
-            showToast('Directory export failed, downloading instead...');
-
-            const result = await chrome.runtime.sendMessage({ action: 'exportCSV' });
-            console.log('Fallback export result:', result);
-            if (result.success) {
-                showToast('CSV downloaded to Downloads folder');
-            } else {
-                showToast('Export failed. Please try re-selecting the export folder.');
-            }
-        }
-    } else {
-        console.log('Using fallback download export');
-        // Fallback to download
-        const result = await chrome.runtime.sendMessage({ action: 'exportCSV' });
-        console.log('Export result:', result);
-        if (result.success) {
-            showToast('CSV downloaded to Downloads folder');
-        } else {
-            showToast('CSV export failed');
-        }
-    }
-});
-
-
-// Write current day's CSV
-async function writeCurrentDayCSV() {
-    console.log('Writing current day CSV...');
-    const today = new Date().toISOString().split('T')[0];
-    const result = await chrome.runtime.sendMessage({ action: 'getUsage' });
-    const usage = result.usage || {};
-
-    console.log('Usage data for CSV:', usage);
-
-    // Generate CSV
-    const rows = Object.entries(usage)
-        .map(([domain, ms]) => ({ domain, seconds: Math.round(ms / 1000) }))
-        .sort((a, b) => b.seconds - a.seconds);
-
-    let csv = 'date,domain,total_seconds\n';
-    for (const row of rows) {
-        csv += `${today},${row.domain},${row.seconds}\n`;
-    }
-
-    console.log('Generated CSV content:', csv);
-
-    const filename = `outside-control-usage-${today}.csv`;
-    console.log('Writing file:', filename);
-
-    // Write using offscreen document
-    try {
-        await ensureOffscreenDocument();
-        const result = await chrome.runtime.sendMessage({
-            action: 'offscreen-write',
-            filename,
-            content: csv
-        });
-        console.log('File write result:', result);
-        return result.success;
-    } catch (e) {
-        console.error('Failed to write CSV:', e);
-        return false;
-    }
-}
-
-// Listen for state error messages
-chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
-    if (request.action === 'stateError') {
-        showStorageError(request.message);
+        console.error('Failed to export ZIP:', e);
+        showToast('Export failed: ' + e.message);
     }
 });
 
@@ -214,16 +47,16 @@ function showToast(message) {
     const toast = document.createElement('div');
     toast.textContent = message;
     toast.style.cssText = `
-    position: fixed;
-    bottom: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: #333;
-    color: white;
-    padding: 10px 20px;
-    border-radius: 4px;
-    z-index: 1000;
-  `;
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #333;
+        color: white;
+        padding: 10px 20px;
+        border-radius: 4px;
+        z-index: 1000;
+    `;
     document.body.appendChild(toast);
     setTimeout(() => toast.remove(), 3000);
 }
@@ -297,21 +130,19 @@ async function loadUsage() {
 
         for (const site of sites) {
             html += `<tr>
-      <td>${site.domain}</td>
-      <td class="time">${site.formatted}</td>
-    </tr>`;
+                <td>${site.domain}</td>
+                <td class="time">${site.formatted}</td>
+            </tr>`;
         }
 
         html += '</tbody></table>';
         container.innerHTML = html;
     } catch (error) {
         console.error('Failed to load usage:', error);
-        // Don't show error here, let the state health check handle it
     }
 }
 
 // Initialize
-loadExportSettings();
 loadCurrentSite();
 loadUsage();
 
