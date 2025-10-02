@@ -1,45 +1,9 @@
 // Offscreen document for File System Access API operations
 // This runs in a Window context which has full access to FSA API
 
+import { getStoredHandle, storeHandle } from './lib/idb.js';
+
 let directoryHandle = null;
-
-// IndexedDB for storing directory handle
-async function openDB() {
-    return new Promise((resolve, reject) => {
-        const request = indexedDB.open('OutsideControl', 1);
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => resolve(request.result);
-        request.onupgradeneeded = (e) => {
-            const db = e.target.result;
-            if (!db.objectStoreNames.contains('handles')) {
-                db.createObjectStore('handles');
-            }
-        };
-    });
-}
-
-async function getStoredHandle() {
-    try {
-        const db = await openDB();
-        const tx = db.transaction(['handles'], 'readonly');
-        const store = tx.objectStore('handles');
-        return new Promise((resolve, reject) => {
-            const request = store.get('exportDirectory');
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error);
-        });
-    } catch (e) {
-        console.error('Failed to get stored handle:', e);
-        return null;
-    }
-}
-
-async function storeHandle(handle) {
-    const db = await openDB();
-    const tx = db.transaction(['handles'], 'readwrite');
-    const store = tx.objectStore('handles');
-    await store.put(handle, 'exportDirectory');
-}
 
 // Load handle on startup
 async function loadHandle() {
