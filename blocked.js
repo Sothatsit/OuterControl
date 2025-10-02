@@ -61,7 +61,7 @@ let currentCode = '';
 function generateCode() {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let newCode = '';
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 16; i++) {
         newCode += chars[Math.floor(Math.random() * chars.length)];
     }
     currentCode = newCode;
