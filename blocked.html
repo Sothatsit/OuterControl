@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Blocked - Outside Control</title>
+  <link rel="stylesheet" href="blocked.css">
+</head>
+<body>
+<div class="container">
+  <img src="giphy.gif" alt="No" width="300" height="300">
+
+  <h1>Site Blocked</h1>
+
+  <div class="info">
+    <p id="group-name"></p>
+    <p id="reason"></p>
+  </div>
+
+  <div class="rules">
+    <h2>Blocking Rules:</h2>
+    <div id="rules-text"></div>
+  </div>
+
+  <div id="actions" class="actions">
+    <div id="grace-section" style="display:none;">
+      <h3>Request 5-minute access:</h3>
+      <p>Type the code shown below:</p>
+      <canvas id="code-canvas" width="200" height="50"></canvas>
+      <input type="text" id="code-input" placeholder="Enter code">
+      <button id="grace-button">Unlock for 5 minutes</button>
+    </div>
+
+    <div id="lunch-section" style="display:none;">
+      <button id="lunch-button">Start 30-minute lunch session</button>
+    </div>
+
+    <div id="visit-section" style="display:none;">
+      <button id="visit-button">Start 15-minute visit</button>
+    </div>
+  </div>
+
+  <div class="timer" id="timer" style="display:none;">
+    <p>Time remaining: <span id="time-remaining"></span></p>
+  </div>
+</div>
+
+<script src="blocked.js"></script>
+</body>
+</html>

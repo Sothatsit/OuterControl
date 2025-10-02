@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Usage Tracker - Outside Control</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            padding: 20px;
+            width: 500px;
+            min-height: 600px;
+            margin: 0;
+            background: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+            margin-top: 0;
+        }
+        .section {
+            background: white;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .section h2 {
+            margin-top: 0;
+            color: #555;
+            font-size: 18px;
+        }
+        .current-site {
+            background: #e3f2fd;
+        }
+        .current-site .status {
+            font-size: 14px;
+            margin: 8px 0;
+        }
+        .current-site .warning {
+            color: #f44336;
+        }
+        .current-site .success {
+            color: #4caf50;
+        }
+        .current-site .info {
+            color: #2196f3;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 14px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px 5px 5px 0;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        button.secondary {
+            background: #2196F3;
+        }
+        button.secondary:hover {
+            background: #0b7dda;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        th, td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background: #f0f0f0;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+        }
+        .time {
+            font-family: monospace;
+            text-align: right;
+        }
+        .folder-status {
+            margin: 10px 0;
+            padding: 10px;
+            background: #f0f0f0;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        .folder-status.configured {
+            background: #e8f5e9;
+        }
+        .usage-table {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .no-data {
+            color: #999;
+            font-style: italic;
+            padding: 20px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+<h1>Outside Control</h1>
+
+<div class="section current-site">
+    <h2>Current Site</h2>
+    <div id="site-info">
+        <div class="no-data">Loading...</div>
+    </div>
+</div>
+
+<div class="section">
+    <h2>Export Settings</h2>
+    <div id="export-status" class="folder-status">
+        <div id="folder-path">No folder selected</div>
+    </div>
+    <button id="select-folder">Select Export Folder</button>
+    <button id="open-folder" class="secondary" style="display:none;">Open Folder</button>
+    <button id="export-today" class="secondary">Export Today's CSV Now</button>
+</div>
+
+<div class="section">
+    <h2>Today's Usage</h2>
+    <div class="usage-table" id="usage-table">
+        <div class="no-data">No usage data yet today</div>
+    </div>
+</div>
+
+<script src="exports.js"></script>
+</body>
+</html>
