@@ -19,11 +19,11 @@ const rules = {
   `,
     streaming: `
     <ul>
-      <li>During work hours (Mon-Fri 9am-6pm): 1 hour total allowed per day (timer starts from first access)</li>
+      <li>During work hours (Mon-Fri 9am-5pm): 1 hour total allowed per day (timer starts from first access)</li>
       <li>After 1-hour allowance exhausted: blocked for rest of work day</li>
-      <li>One 30-minute lunch session available between 12-2pm (if allowance exhausted)</li>
+      <li>Two 30-minute lunch sessions available between 11am-3pm (if allowance exhausted)</li>
       <li>5-minute grace periods available with code entry</li>
-      <li>Unlimited access on weekends and outside work hours (before 9am, after 6pm)</li>
+      <li>Unlimited access on weekends and outside work hours (before 9am, after 5pm)</li>
       <li>Includes: YouTube, Disney+, Paramount+, HBO Max, Netflix</li>
     </ul>
   `,
@@ -48,8 +48,35 @@ function getHost(url) {
 
 const host = getHost(originalUrl);
 
+async function loadTempAccessCount() {
+    try {
+        const result = await chrome.runtime.sendMessage({ action: 'getUsage' });
+        const usage = result.usage || {};
+        const hostData = usage[host];
+        let count = 0;
+
+        if (hostData) {
+            if (typeof hostData === 'object' && hostData.tempAccessCount !== undefined) {
+                count = hostData.tempAccessCount;
+            }
+        }
+
+        const countElem = document.getElementById('temp-access-count');
+        if (count === 0) {
+            countElem.textContent = `You have not requested temporary access for ${host} today.`;
+        } else if (count === 1) {
+            countElem.textContent = `You have requested 1 temporary access for ${host} today.`;
+        } else {
+            countElem.textContent = `You have requested ${count} temporary accesses for ${host} today.`;
+        }
+    } catch (error) {
+        console.error('Failed to load temp access count:', error);
+    }
+}
+
 if (group) {
     document.getElementById('grace-section').style.display = 'block';
+    loadTempAccessCount().catch(err => console.error('Failed to load temp access count:', err));
 }
 
 if (lunchAvailable) {
@@ -94,6 +121,11 @@ document.getElementById('grace-button').addEventListener('click', async () => {
         document.getElementById('code-input').value = '';
         return;
     }
+
+    await chrome.runtime.sendMessage({
+        action: 'recordTempAccess',
+        host: host
+    });
 
     const result = await chrome.runtime.sendMessage({
         action: 'startSession',

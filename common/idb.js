@@ -56,8 +56,7 @@ export async function saveStateToIDB(state) {
     await Promise.all([
         store.put(state.sessions, 'sessions'),
         store.put(state.quotas, 'quotas'),
-        store.put(state.lunchUsed, 'lunchUsed'),
-        store.put(state.streamingFirstAccess, 'streamingFirstAccess'),
+        store.put(state.viewSessions || {}, 'viewSessions'),
         store.put(state.dataVersion, 'dataVersion'),
         store.put(state.lastSaved, 'lastSaved')
     ]);
@@ -86,11 +85,10 @@ export async function loadStateFromIDB() {
     const tx = db.transaction(['state'], 'readonly');
     const store = tx.objectStore('state');
 
-    const [sessions, quotas, lunchUsed, streamingFirstAccess, dataVersion, lastSaved] = await Promise.all([
+    const [sessions, quotas, viewSessions, dataVersion, lastSaved] = await Promise.all([
         new Promise(resolve => { const req = store.get('sessions'); req.onsuccess = () => resolve(req.result); }),
         new Promise(resolve => { const req = store.get('quotas'); req.onsuccess = () => resolve(req.result); }),
-        new Promise(resolve => { const req = store.get('lunchUsed'); req.onsuccess = () => resolve(req.result); }),
-        new Promise(resolve => { const req = store.get('streamingFirstAccess'); req.onsuccess = () => resolve(req.result); }),
+        new Promise(resolve => { const req = store.get('viewSessions'); req.onsuccess = () => resolve(req.result); }),
         new Promise(resolve => { const req = store.get('dataVersion'); req.onsuccess = () => resolve(req.result); }),
         new Promise(resolve => { const req = store.get('lastSaved'); req.onsuccess = () => resolve(req.result); })
     ]);
@@ -98,9 +96,8 @@ export async function loadStateFromIDB() {
     return {
         sessions: sessions || {},
         quotas: quotas || { hn: [] },
-        lunchUsed: lunchUsed || {},
-        streamingFirstAccess: streamingFirstAccess || {},
-        dataVersion: dataVersion || '3.0.0',
+        viewSessions: viewSessions || {},
+        dataVersion: dataVersion || '4.0.0',
         lastSaved: lastSaved || Date.now()
     };
 }

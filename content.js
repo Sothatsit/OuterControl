@@ -57,6 +57,12 @@
     let accumulatedSeconds = 0;
     let lastReportedSeconds = 0;
 
+    await chrome.runtime.sendMessage({
+        action: 'recordUsage',
+        host,
+        seconds: 0
+    });
+
     // Flush on visibility change (when tab becomes hidden)
     document.addEventListener('visibilitychange', async () => {
         if (document.visibilityState === 'hidden' && accumulatedSeconds > lastReportedSeconds) {

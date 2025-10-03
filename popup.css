@@ -84,6 +84,10 @@ th {
     text-align: right;
 }
 
+.views {
+    text-align: right;
+}
+
 .folder-status {
     margin: 10px 0;
     padding: 10px;

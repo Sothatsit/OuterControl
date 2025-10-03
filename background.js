@@ -4,6 +4,7 @@ import { saveStateToIDB, loadStateFromIDB, saveUsageToIDB, loadUsageForDate } fr
 const SEC = 1000;
 const MIN = 60 * SEC;
 const HOUR = 60 * MIN;
+const VIEW_SESSION_TIMEOUT = 60 * SEC;
 
 function buildDomainMap(policies) {
     const map = new Map();
@@ -39,10 +40,11 @@ const POLICIES = {
     },
     streaming: {
         hosts: ['youtube.com', 'disneyplus.com', 'paramountplus.com', 'max.com', 'hbomax.com', 'netflix.com'],
-        workHours: { start: 9, end: 18 },
+        workHours: { start: 9, end: 17 },
         workDays: [1, 2, 3, 4, 5],
-        lunchWindow: { start: 12, end: 14 },
+        lunchWindow: { start: 11, end: 15 },
         lunchDurationMs: 30 * MIN,
+        maxLunchSessions: 2,
         graceDurationMs: 5 * MIN
     },
     hackerNews: {
@@ -58,9 +60,8 @@ const domainMap = buildDomainMap(POLICIES);
 
 let sessions = {};
 let quotas = { hn: [] };
-let lunchUsed = {};
-let streamingFirstAccess = {};
 let usage = {};
+let viewSessions = {};
 
 let ready = false;
 let readyPromise = null;
@@ -124,10 +125,9 @@ async function initialize() {
         await saveStateToIDB({
             sessions: {},
             quotas: { hn: [] },
-            lunchUsed: {},
-            streamingFirstAccess: {},
+            viewSessions: {},
             lastSaved: Date.now(),
-            dataVersion: '3.0.0'
+            dataVersion: '4.0.0'
         });
 
         if (navigator.storage?.estimate) {
@@ -162,12 +162,79 @@ chrome.runtime.onSuspend.addListener(() => {
     saveState();  // May not complete, but we try
 });
 
+function ensureUsageObject(host, date) {
+    if (!usage[date]) usage[date] = {};
+    if (typeof usage[date][host] === 'number') {
+        usage[date][host] = { time: usage[date][host], views: 0, tempAccessCount: 0, lunchCount: 0, firstAccess: null, lastAccess: null };
+    }
+    if (!usage[date][host]) {
+        usage[date][host] = { time: 0, views: 0, tempAccessCount: 0, lunchCount: 0, firstAccess: null, lastAccess: null };
+    }
+    if (!usage[date][host].hasOwnProperty('firstAccess')) {
+        usage[date][host].firstAccess = null;
+    }
+    if (!usage[date][host].hasOwnProperty('lastAccess')) {
+        usage[date][host].lastAccess = null;
+    }
+    if (!usage[date][host].hasOwnProperty('lunchCount')) {
+        usage[date][host].lunchCount = 0;
+    }
+}
+
+function getGroupFirstAccess(group, today) {
+    if (!usage[today]) return null;
+
+    let earliest = null;
+    for (const [domain, data] of Object.entries(usage[today])) {
+        const domainInfo = lookupGroup(domain, domainMap);
+        if (domainInfo?.group === group && data.firstAccess) {
+            if (!earliest || data.firstAccess < earliest) {
+                earliest = data.firstAccess;
+            }
+        }
+    }
+    return earliest;
+}
+
+function getTotalLunchCount(today) {
+    if (!usage[today]) return 0;
+
+    let total = 0;
+    for (const [domain, data] of Object.entries(usage[today])) {
+        const domainInfo = lookupGroup(domain, domainMap);
+        if (domainInfo?.group === 'streaming' && data.lunchCount) {
+            total += data.lunchCount;
+        }
+    }
+    return total;
+}
+
+function cleanupExpiredViewSessions(targetDate, forceEnd = false) {
+    const now = Date.now();
+    const sessionsToClean = [];
+
+    for (const [domain, timestamp] of Object.entries(viewSessions)) {
+        const isExpired = (now - timestamp) > VIEW_SESSION_TIMEOUT;
+        if (forceEnd || isExpired) {
+            sessionsToClean.push(domain);
+        }
+    }
+
+    for (const domain of sessionsToClean) {
+        delete viewSessions[domain];
+    }
+
+    if (sessionsToClean.length > 0) {
+        console.log(`[ViewSessions] Cleaned up ${sessionsToClean.length} sessions for ${targetDate}${forceEnd ? ' (forced)' : ''}`);
+    }
+}
+
 function migrateState(state) {
     const version = state.dataVersion || '1.0.0';
 
     console.log('[Migrate] Current data version:', version);
 
-    if (version === '3.0.0') {
+    if (version === '4.0.0') {
         return state;
     }
 
@@ -182,8 +249,8 @@ function migrateState(state) {
     //     migratedState = migrateFrom2To3(migratedState);
     // }
 
-    migratedState.dataVersion = '3.0.0';
-    console.log('[Migrate] Migrated state from', version, 'to 3.0.0');
+    migratedState.dataVersion = '4.0.0';
+    console.log('[Migrate] Migrated state from', version, 'to 4.0.0');
 
     return migratedState;
 }
@@ -193,8 +260,7 @@ async function loadState() {
 
     sessions = state.sessions;
     quotas = state.quotas;
-    lunchUsed = state.lunchUsed;
-    streamingFirstAccess = state.streamingFirstAccess;
+    viewSessions = state.viewSessions || {};
 
     const now = Date.now();
     for (const key in sessions) {
@@ -205,6 +271,8 @@ async function loadState() {
 
     const today = getDateKey();
     usage[today] = await loadUsageForDate(today);
+
+    cleanupExpiredViewSessions(today);
 
     console.log('[LoadState] Loaded from IndexedDB');
 }
@@ -223,14 +291,16 @@ async function saveState() {
     saving = true;
 
     try {
+        const today = getDateKey();
+        cleanupExpiredViewSessions(today);
+
         const now = Date.now();
         const stateToSave = {
             sessions,
             quotas,
-            lunchUsed,
-            streamingFirstAccess,
+            viewSessions,
             lastSaved: now,
-            dataVersion: '3.0.0'
+            dataVersion: '4.0.0'
         };
 
         if (!validateState(stateToSave)) {
@@ -239,7 +309,6 @@ async function saveState() {
 
         await saveStateToIDB(stateToSave);
 
-        const today = getDateKey();
         if (usage[today]) {
             await saveUsageToIDB(today, usage[today]);
         }
@@ -276,8 +345,15 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 });
 
 async function handleMidnight() {
-    lunchUsed = {};
-    streamingFirstAccess = {};
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayKey = getDateKey(yesterday);
+
+    if (!usage[yesterdayKey]) {
+        usage[yesterdayKey] = await loadUsageForDate(yesterdayKey);
+    }
+
+    cleanupExpiredViewSessions(yesterdayKey, true);
 
     const today = getDateKey();
     usage[today] = await loadUsageForDate(today);
@@ -328,18 +404,20 @@ async function evaluateAccess(host) {
         const day = date.getDay();
         const today = getDateKey();
 
-        const isWorkHours = config.workDays.includes(day) && hour >= config.workHours.start && hour < config.workHours.end;
+        const isWorkDay = config.workDays.includes(day);
+        const isWorkHours = isWorkDay && hour >= config.workHours.start && hour < config.workHours.end;
 
         if (!isWorkHours) {
             return { allow: true, group };
         }
 
-        const firstAccess = streamingFirstAccess[today];
+        const firstAccess = getGroupFirstAccess('streaming', today);
 
         if (firstAccess) {
             const timeSinceFirst = now - firstAccess;
             if (timeSinceFirst >= HOUR) {
-                if (hour >= config.lunchWindow.start && hour < config.lunchWindow.end && !lunchUsed[today]) {
+                const totalLunchCount = getTotalLunchCount(today);
+                if (hour >= config.lunchWindow.start && hour < config.lunchWindow.end && totalLunchCount < config.maxLunchSessions) {
                     return {
                         allow: false,
                         group,
@@ -363,8 +441,6 @@ async function evaluateAccess(host) {
                 };
             }
         } else {
-            streamingFirstAccess[today] = now;
-            await saveState();
             return {
                 allow: true,
                 group,
@@ -434,12 +510,15 @@ function getSiteInfo(host) {
         const hour = date.getHours();
         const day = date.getDay();
         const today = getDateKey();
-        const firstAccess = streamingFirstAccess[today];
-        const isWorkHours = config.workDays.includes(day) && hour >= config.workHours.start && hour < config.workHours.end;
+        const firstAccess = getGroupFirstAccess('streaming', today);
+        const isWorkDay = config.workDays.includes(day);
+        const isWorkHours = isWorkDay && hour >= config.workHours.start && hour < config.workHours.end;
 
         if (!isWorkHours) {
             info.status = 'Not blocked (outside work hours)';
-        } else if (firstAccess) {
+        }
+
+        if (firstAccess) {
             const timeSinceFirst = now - firstAccess;
             const remainingMs = HOUR - timeSinceFirst;
 
@@ -447,14 +526,21 @@ function getSiteInfo(host) {
                 info.allowanceRemaining = Math.ceil(remainingMs / 1000);
                 info.status = `${Math.ceil(remainingMs / 60000)} min remaining of daily allowance`;
             } else {
-                info.status = 'Daily 1-hour allowance exhausted';
-                if (hour >= config.lunchWindow.start && hour < config.lunchWindow.end && !lunchUsed[today]) {
-                    info.lunchAvailable = true;
+                if (isWorkHours) {
+                    info.status = 'Daily 1-hour allowance exhausted';
+                    const totalLunchCount = getTotalLunchCount(today);
+                    if (hour >= config.lunchWindow.start && hour < config.lunchWindow.end && totalLunchCount < config.maxLunchSessions) {
+                        info.lunchAvailable = true;
+                    }
+                } else {
+                    info.status = 'Not blocked (outside work hours)';
                 }
             }
         } else {
-            info.allowanceRemaining = 3600;
-            info.status = '1 hour daily allowance available';
+            if (isWorkHours) {
+                info.allowanceRemaining = 3600;
+                info.status = '1 hour daily allowance available';
+            }
         }
     } else if (group === 'hackerNews') {
         quotas.hn = (quotas.hn || []).filter(timestamp => now - timestamp < config.windowMs);
@@ -487,7 +573,9 @@ async function startSession(host, type, durationMs) {
     chrome.alarms.create(`session-${host}`, { when: expiresAt });
 
     if (type === 'lunch') {
-        lunchUsed[getDateKey()] = true;
+        const today = getDateKey();
+        ensureUsageObject(host, today);
+        usage[today][host].lunchCount++;
     } else if (type === 'hnVisit') {
         quotas.hn = quotas.hn || [];
         quotas.hn.push(now);
@@ -515,11 +603,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             const { host, seconds } = request;
             const today = getDateKey();
 
-            if (!usage[today]) usage[today] = {};
-            const milliseconds = seconds * 1000;
-            usage[today][host] = (usage[today][host] || 0) + milliseconds;
+            cleanupExpiredViewSessions(today);
 
-            console.log(`[RecordUsage] ${host}: +${seconds}s, total today: ${Math.round(usage[today][host]/1000)}s`);
+            ensureUsageObject(host, today);
+
+            const now = Date.now();
+            if (!usage[today][host].firstAccess) {
+                usage[today][host].firstAccess = now;
+            }
+            usage[today][host].lastAccess = now;
+
+            const milliseconds = seconds * 1000;
+            usage[today][host].time += milliseconds;
+
+            if (viewSessions[host]) {
+                viewSessions[host] = Date.now();
+            } else {
+                viewSessions[host] = Date.now();
+                usage[today][host].views++;
+                console.log(`[RecordUsage] ${host}: New view session started`);
+            }
+
+            console.log(`[RecordUsage] ${host}: +${seconds}s, total today: ${Math.round(usage[today][host].time/1000)}s, views: ${usage[today][host].views}`);
 
             return saveState();
         }).then(() => {
@@ -533,6 +638,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     } else if (request.action === 'getUsage') {
         ensureReady().then(() => {
             const today = getDateKey();
+            cleanupExpiredViewSessions(today);
             const todayUsage = usage[today] || {};
             console.log('[GetUsage] Returning data for', today, 'with', Object.keys(todayUsage).length, 'domains');
             sendResponse({ usage: todayUsage });
@@ -555,6 +661,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }).catch(error => {
             console.error('[GetCurrentSite] Failed:', error);
             sendResponse({ host: null, siteInfo: null, error: error.message });
+        });
+        return true;
+    } else if (request.action === 'recordTempAccess') {
+        ensureReady().then(() => {
+            const { host } = request;
+            const today = getDateKey();
+
+            cleanupExpiredViewSessions(today);
+
+            ensureUsageObject(host, today);
+            usage[today][host].tempAccessCount++;
+
+            console.log(`[RecordTempAccess] ${host}: temp access count = ${usage[today][host].tempAccessCount}`);
+
+            return saveState();
+        }).then(() => {
+            sendResponse({ success: true });
+        }).catch(error => {
+            console.error('[RecordTempAccess] Failed:', error);
+            sendResponse({ success: false, error: error.message });
         });
         return true;
     }

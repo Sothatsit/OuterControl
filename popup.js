@@ -5,12 +5,28 @@ function generateCSV(date, usageData) {
     const data = usageData || {};
 
     const rows = Object.entries(data)
-        .map(([domain, ms]) => ({ domain, seconds: Math.round(ms / 1000) }))
+        .map(([domain, entry]) => {
+            let seconds, views, tempAccessCount, firstAccess, lastAccess;
+            if (typeof entry === 'number') {
+                seconds = Math.round(entry / 1000);
+                views = 0;
+                tempAccessCount = 0;
+                firstAccess = '';
+                lastAccess = '';
+            } else {
+                seconds = Math.round(entry.time / 1000);
+                views = entry.views || 0;
+                tempAccessCount = entry.tempAccessCount || 0;
+                firstAccess = entry.firstAccess ? new Date(entry.firstAccess).toISOString() : '';
+                lastAccess = entry.lastAccess ? new Date(entry.lastAccess).toISOString() : '';
+            }
+            return { domain, seconds, views, tempAccessCount, firstAccess, lastAccess };
+        })
         .sort((a, b) => b.seconds - a.seconds);
 
-    let csv = 'date,domain,total_seconds\n';
+    let csv = 'date,domain,total_seconds,views,temp_access_count,first_access,last_access\n';
     for (const row of rows) {
-        csv += `${date},${row.domain},${row.seconds}\n`;
+        csv += `${date},${row.domain},${row.seconds},${row.views},${row.tempAccessCount},${row.firstAccess},${row.lastAccess}\n`;
     }
 
     return csv;
@@ -116,11 +132,22 @@ async function loadUsage() {
         const usage = result.usage || {};
 
         const sites = Object.entries(usage)
-            .map(([domain, ms]) => ({
-                domain,
-                seconds: Math.round(ms / 1000),
-                formatted: formatTime(Math.round(ms / 1000))
-            }))
+            .map(([domain, data]) => {
+                let seconds, views;
+                if (typeof data === 'number') {
+                    seconds = Math.round(data / 1000);
+                    views = 0;
+                } else {
+                    seconds = Math.round(data.time / 1000);
+                    views = data.views || 0;
+                }
+                return {
+                    domain,
+                    seconds,
+                    views,
+                    formatted: formatTime(seconds)
+                };
+            })
             .sort((a, b) => b.seconds - a.seconds)
             .slice(0, 50);
 
@@ -131,12 +158,13 @@ async function loadUsage() {
             return;
         }
 
-        let html = '<table><thead><tr><th>Domain</th><th class="time">Time</th></tr></thead><tbody>';
+        let html = '<table><thead><tr><th>Domain</th><th class="time">Time</th><th class="views">Views</th></tr></thead><tbody>';
 
         for (const site of sites) {
             html += `<tr>
                 <td>${site.domain}</td>
                 <td class="time">${site.formatted}</td>
+                <td class="views">${site.views}</td>
             </tr>`;
         }
 
