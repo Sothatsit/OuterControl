@@ -1,38 +1,7 @@
 import { getAllUsageForExport } from './common/idb.js';
 import { formatTime, formatTimeRemaining } from './common/time.js';
 
-function generateCSV(date, usageData) {
-    const data = usageData || {};
-
-    const rows = Object.entries(data)
-        .map(([domain, entry]) => {
-            let seconds, views, tempAccessCount, firstAccess, lastAccess;
-            if (typeof entry === 'number') {
-                seconds = Math.round(entry / 1000);
-                views = 0;
-                tempAccessCount = 0;
-                firstAccess = '';
-                lastAccess = '';
-            } else {
-                seconds = Math.round(entry.time / 1000);
-                views = entry.views || 0;
-                tempAccessCount = entry.tempAccessCount || 0;
-                firstAccess = entry.firstAccess ? new Date(entry.firstAccess).toISOString() : '';
-                lastAccess = entry.lastAccess ? new Date(entry.lastAccess).toISOString() : '';
-            }
-            return { domain, seconds, views, tempAccessCount, firstAccess, lastAccess };
-        })
-        .sort((a, b) => b.seconds - a.seconds);
-
-    let csv = 'date,domain,total_seconds,views,temp_access_count,first_access,last_access\n';
-    for (const row of rows) {
-        csv += `${date},${row.domain},${row.seconds},${row.views},${row.tempAccessCount},${row.firstAccess},${row.lastAccess}\n`;
-    }
-
-    return csv;
-}
-
-document.getElementById('download-zip').addEventListener('click', async () => {
+document.getElementById('download-csv').addEventListener('click', async () => {
     try {
         const allUsage = await getAllUsageForExport();
 
@@ -41,29 +10,49 @@ document.getElementById('download-zip').addEventListener('click', async () => {
             return;
         }
 
-        const zip = new JSZip();
+        let csv = 'date,domain,total_seconds,views,temp_access_count,first_access,last_access\n';
 
         for (const entry of allUsage) {
-            const csv = generateCSV(entry.date, entry.data);
-            const filename = `outside-control-usage-${entry.date}.csv`;
-            zip.file(filename, csv);
+            const data = entry.data || {};
+            const rows = Object.entries(data)
+                .map(([domain, entryData]) => {
+                    let seconds, views, tempAccessCount, firstAccess, lastAccess;
+                    if (typeof entryData === 'number') {
+                        seconds = Math.round(entryData / 1000);
+                        views = 0;
+                        tempAccessCount = 0;
+                        firstAccess = '';
+                        lastAccess = '';
+                    } else {
+                        seconds = Math.round(entryData.time / 1000);
+                        views = entryData.views || 0;
+                        tempAccessCount = entryData.tempAccessCount || 0;
+                        firstAccess = entryData.firstAccess ? new Date(entryData.firstAccess).toISOString() : '';
+                        lastAccess = entryData.lastAccess ? new Date(entryData.lastAccess).toISOString() : '';
+                    }
+                    return { domain, seconds, views, tempAccessCount, firstAccess, lastAccess };
+                })
+                .sort((a, b) => b.seconds - a.seconds);
+
+            for (const row of rows) {
+                csv += `${entry.date},${row.domain},${row.seconds},${row.views},${row.tempAccessCount},${row.firstAccess},${row.lastAccess}\n`;
+            }
         }
 
-        const blob = await zip.generateAsync({ type: 'blob' });
+        const blob = new Blob([csv], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
 
         await chrome.downloads.download({
             url: url,
-            filename: 'outside-control-usage.zip',
+            filename: 'outer-control-usage.csv',
             saveAs: true
         });
 
         showToast(`Exported ${allUsage.length} days of usage data`);
 
-        // Clean up object URL after a short delay
         setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) {
-        console.error('Failed to export ZIP:', e);
+        console.error('Failed to export CSV:', e);
         showToast('Export failed: ' + e.message);
     }
 });
