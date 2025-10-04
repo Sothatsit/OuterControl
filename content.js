@@ -26,30 +26,20 @@
     console.log('[Tracker] Access response:', response);
 
     if (!response.allow) {
-        const blockUrl = chrome.runtime.getURL('blocked.html') +
-            '?url=' + encodeURIComponent(url) +
-            '&group=' + response.group +
-            '&reason=' + encodeURIComponent(response.reason || '') +
-            '&lunchAvailable=' + (response.lunchAvailable || false) +
-            '&graceMs=' + (response.graceDurationMs || 0);
-
-        window.location.replace(blockUrl);
+        window.location.replace(chrome.runtime.getURL('blocked.html') +
+            '?url=' + encodeURIComponent(url));
     } else if (response.remainingMs) {
         // Set timer for session expiry
         setTimeout(() => {
             window.location.replace(chrome.runtime.getURL('blocked.html') +
-                '?url=' + encodeURIComponent(url) +
-                '&group=' + response.group +
-                '&reason=' + encodeURIComponent('Session expired'));
+                '?url=' + encodeURIComponent(url));
         }, response.remainingMs);
     }
 
     chrome.runtime.onMessage.addListener((request) => {
         if (request.action === 'sessionExpired') {
             window.location.replace(chrome.runtime.getURL('blocked.html') +
-                '?url=' + encodeURIComponent(url) +
-                '&group=' + response.group +
-                '&reason=' + encodeURIComponent('Session expired'));
+                '?url=' + encodeURIComponent(url));
         }
     });
 

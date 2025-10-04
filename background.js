@@ -49,9 +49,8 @@ const POLICIES = {
     },
     hackerNews: {
         hosts: ['news.ycombinator.com'],
-        maxVisits: 3,
-        windowMs: 3 * HOUR,
-        visitDurationMs: 5 * MIN,
+        workHours: { start: 9, end: 17 },
+        workDays: [1, 2, 3, 4, 5],
         graceDurationMs: 5 * MIN
     }
 };
@@ -59,7 +58,6 @@ const POLICIES = {
 const domainMap = buildDomainMap(POLICIES);
 
 let sessions = {};
-let quotas = { hn: [] };
 let usage = {};
 let viewSessions = {};
 
@@ -124,7 +122,6 @@ async function initialize() {
 
         await saveStateToIDB({
             sessions: {},
-            quotas: { hn: [] },
             viewSessions: {},
             lastSaved: Date.now(),
             dataVersion: '4.0.0'
@@ -259,7 +256,6 @@ async function loadState() {
     const state = await loadStateFromIDB();
 
     sessions = state.sessions;
-    quotas = state.quotas;
     viewSessions = state.viewSessions || {};
 
     const now = Date.now();
@@ -297,7 +293,6 @@ async function saveState() {
         const now = Date.now();
         const stateToSave = {
             sessions,
-            quotas,
             viewSessions,
             lastSaved: now,
             dataVersion: '4.0.0'
@@ -450,35 +445,21 @@ async function evaluateAccess(host) {
     }
 
     if (group === 'hackerNews') {
-        quotas.hn = (quotas.hn || []).filter(timestamp => now - timestamp < config.windowMs);
+        const date = new Date();
+        const hour = date.getHours();
+        const day = date.getDay();
 
-        if (quotas.hn.length < config.maxVisits) {
-            const expiresAt = now + config.visitDurationMs;
+        const isWorkDay = config.workDays.includes(day);
+        const isWorkHours = isWorkDay && hour >= config.workHours.start && hour < config.workHours.end;
 
-            sessions[host] = {
-                type: 'hnVisit',
-                startedAt: now,
-                expiresAt
-            };
-
-            quotas.hn.push(now);
-            chrome.alarms.create(`session-${host}`, { when: expiresAt });
-            await saveState();
-
-            return {
-                allow: true,
-                group,
-                remainingMs: config.visitDurationMs
-            };
+        if (!isWorkHours) {
+            return { allow: true, group };
         }
-
-        const oldestVisit = Math.min(...quotas.hn);
-        const nextAllowed = oldestVisit + config.windowMs;
 
         return {
             allow: false,
             group,
-            reason: `Quota exceeded. Next visit at ${new Date(nextAllowed).toLocaleTimeString()}`,
+            reason: 'Blocked during work hours. 5-minute grace available.',
             graceDurationMs: config.graceDurationMs
         };
     }
@@ -543,17 +524,17 @@ function getSiteInfo(host) {
             }
         }
     } else if (group === 'hackerNews') {
-        quotas.hn = (quotas.hn || []).filter(timestamp => now - timestamp < config.windowMs);
-        const visitsRemaining = config.maxVisits - quotas.hn.length;
+        const date = new Date();
+        const hour = date.getHours();
+        const day = date.getDay();
 
-        if (visitsRemaining > 0) {
-            info.visitsRemaining = visitsRemaining;
-            info.status = `${visitsRemaining} visits remaining`;
+        const isWorkDay = config.workDays.includes(day);
+        const isWorkHours = isWorkDay && hour >= config.workHours.start && hour < config.workHours.end;
+
+        if (!isWorkHours) {
+            info.status = 'Not blocked (outside work hours)';
         } else {
-            const oldestVisit = Math.min(...quotas.hn);
-            const resetMs = (oldestVisit + config.windowMs) - now;
-            info.resetIn = Math.ceil(resetMs / 1000);
-            info.status = 'Quota exceeded';
+            info.status = 'Blocked during work hours (5-min grace available)';
         }
     }
 
@@ -576,9 +557,6 @@ async function startSession(host, type, durationMs) {
         const today = getDateKey();
         ensureUsageObject(host, today);
         usage[today][host].lunchCount++;
-    } else if (type === 'hnVisit') {
-        quotas.hn = quotas.hn || [];
-        quotas.hn.push(now);
     }
 
     await saveState();

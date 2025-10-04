@@ -1,14 +1,57 @@
 const params = new URLSearchParams(window.location.search);
 const originalUrl = params.get('url');
-const group = params.get('group');
-const reason = params.get('reason');
-const lunchAvailable = params.get('lunchAvailable') === 'true';
-const graceMs = Number(params.get('graceMs')) || 0;
 
-document.getElementById('group-name').textContent = `Blocking Group: ${group}`;
-document.getElementById('reason').textContent = reason || 'Access restricted';
+let group = null;
+let reason = null;
+let lunchAvailable = false;
+let graceMs = 0;
+let host = null;
 
-const rulesText = document.getElementById('rules-text');
+function getHost(url) {
+    try {
+        return new URL(url).hostname;
+    } catch {
+        return null;
+    }
+}
+
+host = getHost(originalUrl);
+
+async function loadBlockingInfo() {
+    const response = await chrome.runtime.sendMessage({
+        action: 'checkAccess',
+        host: host
+    });
+
+    if (response.allow) {
+        // Not blocked anymore, redirect back
+        window.location.href = originalUrl;
+        return;
+    }
+
+    group = response.group;
+    reason = response.reason || 'Access restricted';
+    lunchAvailable = response.lunchAvailable || false;
+    graceMs = response.graceDurationMs || 0;
+
+    document.getElementById('group-name').textContent = `Blocking Group: ${group}`;
+    document.getElementById('reason').textContent = reason;
+
+    const rulesText = document.getElementById('rules-text');
+    rulesText.innerHTML = rules[group] || '<p>No specific rules defined</p>';
+
+    if (group && graceMs > 0) {
+        document.getElementById('grace-section').style.display = 'block';
+        generateCode();
+    }
+
+    if (lunchAvailable) {
+        document.getElementById('lunch-section').style.display = 'block';
+    }
+
+    await loadTempAccessCount();
+}
+
 const rules = {
     social: `
     <ul>
@@ -36,17 +79,8 @@ const rules = {
     </ul>
   `
 };
-rulesText.innerHTML = rules[group] || '<p>No specific rules defined</p>';
 
-function getHost(url) {
-    try {
-        return new URL(url).hostname;
-    } catch {
-        return null;
-    }
-}
-
-const host = getHost(originalUrl);
+loadBlockingInfo().catch(err => console.error('Failed to load blocking info:', err));
 
 async function loadTempAccessCount() {
     try {
@@ -74,15 +108,6 @@ async function loadTempAccessCount() {
     }
 }
 
-if (group) {
-    document.getElementById('grace-section').style.display = 'block';
-    loadTempAccessCount().catch(err => console.error('Failed to load temp access count:', err));
-}
-
-if (lunchAvailable) {
-    document.getElementById('lunch-section').style.display = 'block';
-}
-
 let currentCode = '';
 
 function generateCode() {
@@ -106,10 +131,6 @@ function generateCode() {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(currentCode, canvas.width / 2, canvas.height / 2);
-}
-
-if (document.getElementById('grace-section').style.display !== 'none') {
-    generateCode();
 }
 
 document.getElementById('grace-button').addEventListener('click', async () => {
