@@ -268,6 +268,19 @@ async function loadState() {
     const today = getDateKey();
     usage[today] = await loadUsageForDate(today);
 
+    // Reset any firstAccess times before 6am
+    if (usage[today]) {
+        for (const [domain, data] of Object.entries(usage[today])) {
+            if (data.firstAccess) {
+                const accessDate = new Date(data.firstAccess);
+                if (accessDate.getHours() < 6) {
+                    console.log(`[LoadState] Resetting ${domain} firstAccess from ${accessDate.toLocaleTimeString()} (before 6am)`);
+                    data.firstAccess = null;
+                }
+            }
+        }
+    }
+
     cleanupExpiredViewSessions(today);
 
     console.log('[LoadState] Loaded from IndexedDB');
@@ -586,7 +599,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             ensureUsageObject(host, today);
 
             const now = Date.now();
-            if (!usage[today][host].firstAccess) {
+            const currentHour = new Date(now).getHours();
+
+            // Only set firstAccess if it's 6am or later
+            if (!usage[today][host].firstAccess && currentHour >= 6) {
                 usage[today][host].firstAccess = now;
             }
             usage[today][host].lastAccess = now;
