@@ -4,6 +4,8 @@ const originalUrl = params.get('url');
 let group = null;
 let reason = null;
 let lunchAvailable = false;
+let lunchCount = 0;
+let maxLunchSessions = 0;
 let graceMs = 0;
 let host = null;
 
@@ -16,6 +18,15 @@ function getHost(url) {
 }
 
 host = getHost(originalUrl);
+
+function formatDuration(ms) {
+    const minutes = Math.round(ms / 60000);
+    if (minutes % 60 === 0) {
+        const hours = minutes / 60;
+        return `${hours} hour${hours === 1 ? '' : 's'}`;
+    }
+    return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+}
 
 async function loadBlockingInfo() {
     const response = await chrome.runtime.sendMessage({
@@ -32,6 +43,8 @@ async function loadBlockingInfo() {
     group = response.group;
     reason = response.reason || 'Access restricted';
     lunchAvailable = response.lunchAvailable || false;
+    lunchCount = response.lunchCount || 0;
+    maxLunchSessions = response.maxLunchSessions || 0;
     graceMs = response.graceDurationMs || 0;
 
     document.getElementById('group-name').textContent = `Blocking Group: ${group}`;
@@ -42,7 +55,14 @@ async function loadBlockingInfo() {
 
     if (group && graceMs > 0) {
         document.getElementById('grace-section').style.display = 'block';
+        const graceButton = document.getElementById('grace-button');
+        graceButton.textContent = `Unlock for ${formatDuration(graceMs)}`;
         generateCode();
+    }
+
+    if (group === 'streaming' && maxLunchSessions > 0) {
+        document.getElementById('lunch-count').textContent = `Lunch sessions used: ${lunchCount}/${maxLunchSessions}`;
+        document.getElementById('lunch-count').style.display = 'block';
     }
 
     if (lunchAvailable) {
@@ -64,17 +84,19 @@ const rules = {
     <ul>
       <li>During work hours (Mon-Fri 9am-5pm): 1 hour total allowed per day (timer starts from first access)</li>
       <li>After 1-hour allowance exhausted: blocked for rest of work day</li>
-      <li>Two 30-minute lunch sessions available between 11am-3pm (if allowance exhausted)</li>
-      <li>5-minute grace periods available with code entry</li>
-      <li>Unlimited access on weekends and outside work hours (before 9am, after 5pm)</li>
+      <li>Three 45-minute lunch sessions available between 11am-3pm (if allowance exhausted)</li>
+      <li>5-minute grace periods available with code entry during work hours</li>
+      <li>Evening hours (9pm-2am): blocked, but 30-minute sessions available with code entry</li>
+      <li>Unlimited access on weekends and outside restricted hours (5pm-9pm, 2am-9am)</li>
       <li>Includes: YouTube, Disney+, Paramount+, HBO Max, Netflix</li>
     </ul>
   `,
     hackerNews: `
     <ul>
-      <li>3 visits allowed every 3 hours</li>
-      <li>Each visit limited to 5 minutes</li>
+      <li>Blocked during work hours (Mon-Fri 9am-5pm)</li>
+      <li>Blocked during evening hours (9pm-2am)</li>
       <li>5-minute grace periods available with code entry</li>
+      <li>Unlimited access outside restricted hours</li>
       <li>Applies to: news.ycombinator.com</li>
     </ul>
   `
@@ -166,7 +188,7 @@ if (document.getElementById('lunch-button')) {
             action: 'startSession',
             host: host,
             type: 'lunch',
-            durationMs: 30 * 60 * 1000
+            durationMs: 45 * 60 * 1000
         });
 
         if (result.success) {

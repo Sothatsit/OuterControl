@@ -116,11 +116,13 @@ async function loadCurrentSite() {
 }
 
 async function loadUsage() {
+    const container = document.getElementById('usage-table');
     try {
         const result = await chrome.runtime.sendMessage({ action: 'getUsage' });
         const usage = result.usage || {};
 
         const sites = Object.entries(usage)
+            .filter(([domain]) => !domain.startsWith('__'))
             .map(([domain, data]) => {
                 let seconds, views;
                 if (typeof data === 'number') {
@@ -139,8 +141,6 @@ async function loadUsage() {
             })
             .sort((a, b) => b.seconds - a.seconds)
             .slice(0, 50);
-
-        const container = document.getElementById('usage-table');
 
         if (sites.length === 0) {
             container.innerHTML = '<p class="no-data">No usage data yet today</p>';

@@ -28,6 +28,7 @@
     if (!response.allow) {
         window.location.replace(chrome.runtime.getURL('blocked.html') +
             '?url=' + encodeURIComponent(url));
+        return;
     } else if (response.remainingMs) {
         // Set timer for session expiry
         setTimeout(() => {

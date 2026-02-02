@@ -43,9 +43,10 @@ const POLICIES = {
         workHours: { start: 9, end: 17 },
         workDays: [1, 2, 3, 4, 5],
         lunchWindow: { start: 11, end: 15 },
-        lunchDurationMs: 30 * MIN,
-        maxLunchSessions: 2,
-        graceDurationMs: 5 * MIN
+        lunchDurationMs: 45 * MIN,
+        maxLunchSessions: 3,
+        graceDurationMs: 5 * MIN,
+        eveningGraceDurationMs: 30 * MIN
     },
     hackerNews: {
         hosts: ['news.ycombinator.com'],
@@ -194,16 +195,8 @@ function getGroupFirstAccess(group, today) {
 }
 
 function getTotalLunchCount(today) {
-    if (!usage[today]) return 0;
-
-    let total = 0;
-    for (const [domain, data] of Object.entries(usage[today])) {
-        const domainInfo = lookupGroup(domain, domainMap);
-        if (domainInfo?.group === 'streaming' && data.lunchCount) {
-            total += data.lunchCount;
-        }
-    }
-    return total;
+    if (!usage[today] || !usage[today]['__lunch__']) return 0;
+    return usage[today]['__lunch__'].lunchCount || 0;
 }
 
 function cleanupExpiredViewSessions(targetDate, forceEnd = false) {
@@ -345,10 +338,14 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     } else if (alarm.name === 'saveUsage') {
         await saveState();
     } else if (alarm.name.startsWith('session-')) {
-        const host = alarm.name.substring(8);
-        delete sessions[host];
+        const sessionKey = alarm.name.substring(8);
+        delete sessions[sessionKey];
         await saveState();
-        notifyTabsOfBlock(host);
+        if (sessionKey === 'streaming') {
+            notifyStreamingTabs();
+        } else {
+            notifyTabsOfBlock(sessionKey);
+        }
     }
 });
 
@@ -362,6 +359,10 @@ async function handleMidnight() {
     }
 
     cleanupExpiredViewSessions(yesterdayKey, true);
+
+    if (usage[yesterdayKey]) {
+        await saveUsageToIDB(yesterdayKey, usage[yesterdayKey]);
+    }
 
     const today = getDateKey();
     usage[today] = await loadUsageForDate(today);
@@ -389,11 +390,12 @@ async function evaluateAccess(host) {
 
     const { group, config } = domainInfo;
 
-    if (sessions[host] && sessions[host].expiresAt > now) {
+    const activeSession = sessions[host] || (group === 'streaming' ? sessions['streaming'] : null);
+    if (activeSession && activeSession.expiresAt > now) {
         return {
             allow: true,
             group,
-            remainingMs: sessions[host].expiresAt - now
+            remainingMs: activeSession.expiresAt - now
         };
     }
 
@@ -414,9 +416,19 @@ async function evaluateAccess(host) {
 
         const isWorkDay = config.workDays.includes(day);
         const isWorkHours = isWorkDay && hour >= config.workHours.start && hour < config.workHours.end;
+        const isEveningHours = hour >= 21 || hour < 2;
 
-        if (!isWorkHours) {
+        if (!isWorkHours && !isEveningHours) {
             return { allow: true, group };
+        }
+
+        if (isEveningHours) {
+            return {
+                allow: false,
+                group,
+                reason: 'Blocked during evening hours (9pm-2am). 30-minute session available.',
+                graceDurationMs: config.eveningGraceDurationMs
+            };
         }
 
         const firstAccess = getGroupFirstAccess('streaming', today);
@@ -431,6 +443,8 @@ async function evaluateAccess(host) {
                         group,
                         reason: 'Daily allowance used. Lunch session available.',
                         lunchAvailable: true,
+                        lunchCount: totalLunchCount,
+                        maxLunchSessions: config.maxLunchSessions,
                         graceDurationMs: config.graceDurationMs
                     };
                 }
@@ -438,6 +452,8 @@ async function evaluateAccess(host) {
                     allow: false,
                     group,
                     reason: 'Daily 1-hour allowance exhausted. Blocked during work hours.',
+                    lunchCount: totalLunchCount,
+                    maxLunchSessions: config.maxLunchSessions,
                     graceDurationMs: config.graceDurationMs
                 };
             } else {
@@ -464,9 +480,19 @@ async function evaluateAccess(host) {
 
         const isWorkDay = config.workDays.includes(day);
         const isWorkHours = isWorkDay && hour >= config.workHours.start && hour < config.workHours.end;
+        const isEveningHours = hour >= 21 || hour < 2;
 
-        if (!isWorkHours) {
+        if (!isWorkHours && !isEveningHours) {
             return { allow: true, group };
+        }
+
+        if (isEveningHours) {
+            return {
+                allow: false,
+                group,
+                reason: 'Blocked during evening hours (9pm-2am).',
+                graceDurationMs: config.graceDurationMs
+            };
         }
 
         return {
@@ -491,9 +517,10 @@ function getSiteInfo(host) {
     const { group, config } = domainInfo;
     const info = { group, host };
 
-    if (sessions[host] && sessions[host].expiresAt > now) {
-        const remainingMs = sessions[host].expiresAt - now;
-        info.sessionType = sessions[host].type;
+    const activeSession = sessions[host] || (group === 'streaming' ? sessions['streaming'] : null);
+    if (activeSession && activeSession.expiresAt > now) {
+        const remainingMs = activeSession.expiresAt - now;
+        info.sessionType = activeSession.type;
         info.sessionRemaining = Math.ceil(remainingMs / 1000);
     }
 
@@ -507,12 +534,13 @@ function getSiteInfo(host) {
         const firstAccess = getGroupFirstAccess('streaming', today);
         const isWorkDay = config.workDays.includes(day);
         const isWorkHours = isWorkDay && hour >= config.workHours.start && hour < config.workHours.end;
+        const isEveningHours = hour >= 21 || hour < 2;
 
-        if (!isWorkHours) {
-            info.status = 'Not blocked (outside work hours)';
-        }
-
-        if (firstAccess) {
+        if (isEveningHours) {
+            info.status = 'Blocked during evening hours (30-minute session available)';
+        } else if (!isWorkHours) {
+            info.status = 'Not blocked (outside restricted hours)';
+        } else if (firstAccess) {
             const timeSinceFirst = now - firstAccess;
             const remainingMs = HOUR - timeSinceFirst;
 
@@ -520,21 +548,15 @@ function getSiteInfo(host) {
                 info.allowanceRemaining = Math.ceil(remainingMs / 1000);
                 info.status = `${Math.ceil(remainingMs / 60000)} min remaining of daily allowance`;
             } else {
-                if (isWorkHours) {
-                    info.status = 'Daily 1-hour allowance exhausted';
-                    const totalLunchCount = getTotalLunchCount(today);
-                    if (hour >= config.lunchWindow.start && hour < config.lunchWindow.end && totalLunchCount < config.maxLunchSessions) {
-                        info.lunchAvailable = true;
-                    }
-                } else {
-                    info.status = 'Not blocked (outside work hours)';
+                info.status = 'Daily 1-hour allowance exhausted';
+                const totalLunchCount = getTotalLunchCount(today);
+                if (hour >= config.lunchWindow.start && hour < config.lunchWindow.end && totalLunchCount < config.maxLunchSessions) {
+                    info.lunchAvailable = true;
                 }
             }
         } else {
-            if (isWorkHours) {
-                info.allowanceRemaining = 3600;
-                info.status = '1 hour daily allowance available';
-            }
+            info.allowanceRemaining = 3600;
+            info.status = '1 hour daily allowance available';
         }
     } else if (group === 'hackerNews') {
         const date = new Date();
@@ -543,9 +565,12 @@ function getSiteInfo(host) {
 
         const isWorkDay = config.workDays.includes(day);
         const isWorkHours = isWorkDay && hour >= config.workHours.start && hour < config.workHours.end;
+        const isEveningHours = hour >= 21 || hour < 2;
 
-        if (!isWorkHours) {
-            info.status = 'Not blocked (outside work hours)';
+        if (isEveningHours) {
+            info.status = 'Blocked during evening hours (9pm-2am)';
+        } else if (!isWorkHours) {
+            info.status = 'Not blocked (outside restricted hours)';
         } else {
             info.status = 'Blocked during work hours (5-min grace available)';
         }
@@ -558,18 +583,23 @@ async function startSession(host, type, durationMs) {
     const now = Date.now();
     const expiresAt = now + durationMs;
 
-    sessions[host] = {
+    const sessionKey = type === 'lunch' ? 'streaming' : host;
+
+    sessions[sessionKey] = {
         type,
         startedAt: now,
         expiresAt
     };
 
-    chrome.alarms.create(`session-${host}`, { when: expiresAt });
+    chrome.alarms.create(`session-${sessionKey}`, { when: expiresAt });
 
     if (type === 'lunch') {
         const today = getDateKey();
-        ensureUsageObject(host, today);
-        usage[today][host].lunchCount++;
+        if (!usage[today]) usage[today] = {};
+        if (!usage[today]['__lunch__']) {
+            usage[today]['__lunch__'] = { lunchCount: 0 };
+        }
+        usage[today]['__lunch__'].lunchCount++;
     }
 
     await saveState();
@@ -689,3 +719,15 @@ async function notifyTabsOfBlock(host) {
     }
 }
 
+async function notifyStreamingTabs() {
+    const tabs = await chrome.tabs.query({});
+    for (const tab of tabs) {
+        if (tab.url) {
+            const host = getHost(tab.url);
+            const domainInfo = lookupGroup(host, domainMap);
+            if (domainInfo?.group === 'streaming') {
+                chrome.tabs.sendMessage(tab.id, { action: 'sessionExpired' }).catch(() => {});
+            }
+        }
+    }
+}
