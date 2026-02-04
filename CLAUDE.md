@@ -38,7 +38,7 @@ A Chrome extension (Manifest V3) for blocking distracting websites and tracking 
 ### background.js
 - Manages three blocking policies:
   - **Social media** (Reddit, Twitter/X): Always blocked, 5-minute grace periods
-  - **Streaming** (YouTube, Disney+, etc.): Blocked during work hours (Mon-Fri 9am-6pm) after 1-hour daily allowance, 30-minute lunch sessions available (12-2pm), 5-minute grace periods
+  - **Streaming** (YouTube, Disney+, etc.): Blocked during work hours (Mon-Fri 9am-6pm) after 1-hour daily allowance, 45-minute lunch sessions available (11am-3pm, apply to all streaming sites), 5-minute grace periods
   - **Hacker News**: 3 visits per 3-hour window, 5-minute visit duration, 5-minute grace periods
 - Tracks time spent on all websites
 - Stores usage data and state in IndexedDB
@@ -56,7 +56,7 @@ A Chrome extension (Manifest V3) for blocking distracting websites and tracking 
 - Displays blocking reason and rules for each policy
 - Generates random codes for grace period verification (prevents copy/paste)
 - Handles grace period unlock (5 minutes for all policies)
-- Manages lunch sessions (30-minute access during lunch hours for streaming)
+- Manages lunch sessions (45-minute access during lunch hours for all streaming sites)
 
 ### popup.js
 - Displays current site status and blocking information
